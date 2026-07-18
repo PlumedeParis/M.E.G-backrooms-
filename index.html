@@ -262,6 +262,7 @@
   <div class="tbtn" id="btnVHS">📹</div>
   <div class="tbtn" id="btnRun">RUN</div>
   <div class="tbtn" id="btnChat" style="right:90px;bottom:170px;font-size:16px">💬</div>
+  <div class="tbtn" id="btnPause" style="left:16px;top:56px;width:40px;height:40px;font-size:15px">☰</div>
 </div>
 
 <div class="screen scan" id="title">
@@ -2290,6 +2291,7 @@ function bindInput(){
     $('btnE').addEventListener('touchstart',e=>{e.preventDefault();tryInteract();},{passive:false});
     $('btnRun').addEventListener('touchstart',e=>{e.preventDefault();runHeld=true;},{passive:false});
     $('btnRun').addEventListener('touchend',()=>runHeld=false);
+    $('btnPause').addEventListener('touchstart',e=>{e.preventDefault();togglePause();},{passive:false});
   }
 }
 const joy={x:0,y:0};
