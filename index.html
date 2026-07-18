@@ -75,6 +75,9 @@
   #lvnext{color:#57e389;} #xpnum{font-size:9px;opacity:.9;}
   #batline{font-size:10px;color:#cfae5a;margin-top:4px;}
   #hotbar{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:5px;pointer-events:auto;}
+  #vcursor{position:fixed;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;
+    border:1.5px solid #e8c15a;background:rgba(232,193,90,.25);pointer-events:none;z-index:70;display:none;}
+  #vcursor.on{display:block;}
   .slot{width:44px;height:44px;background:rgba(10,10,10,.72);border:1px solid #2c2c2c;position:relative;
     display:flex;align-items:center;justify-content:center;font-size:20px;color:#ddd;}
   .slot .n{position:absolute;top:1px;left:3px;font-size:8px;color:#999;}
@@ -256,6 +259,7 @@
   <div id="hotbar"></div>
 </div>
 
+<div id="vcursor"></div>
 <div id="touchUI">
   <div id="joyBase"><div id="joyKnob"></div></div>
   <div id="lookZone"></div>
@@ -1088,11 +1092,14 @@ function buildDungeon(grid,cfg){
   const ci=x=>clamp(Math.floor((x-ox)/C),0,NX-1), cj=z=>clamp(Math.floor((z-oz)/C),0,NZ-1);
   const fAt=(i,j)=>elev[clamp(j,0,NZ-1)][clamp(i,0,NX-1)]*eS;
   const weird=cfg.weirdChance||0;
+  const skipFloor=cfg.skipFloor||(()=>false);
   const invertedSet=new Set();
   if(weird>0) order.forEach(([i,j])=>{ if((i||j)&&Math.random()<weird*.3) invertedSet.add(i+','+j); });
   for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++){
     const fy=fAt(i,j), hy=hFn(i,j), inv=invertedSet.has(i+','+j);
-    box(C,.2,C,inv?matCeil:matFloor,ox+i*C+C/2,fy-.1,oz+j*C+C/2,{col:false});
+    // skipFloor : laisse la cellule creuse (ex: bassin d'eau construit séparément en-dessous) —
+    // sans ça, le carrelage plat masquait entièrement la piscine et le joueur tombait dedans sans la voir
+    if(!skipFloor(i,j)) box(C,.2,C,inv?matCeil:matFloor,ox+i*C+C/2,fy-.1,oz+j*C+C/2,{col:false});
     box(C,.2,C,inv?matFloor:matCeil,ox+i*C+C/2,fy+hy,oz+j*C+C/2,{col:false});
   }
   for(let i=0;i<=NX;i++)for(let j=0;j<NZ;j++)if(vw[i][j]){
@@ -1108,7 +1115,7 @@ function buildDungeon(grid,cfg){
     box(C+.32,top-bot,.32,matWall,ox+i*C+C/2,bot+(top-bot)/2,oz+j*C,{cast:true});
   }
   if(cfg.pillarChance) for(let i=1;i<NX;i++)for(let j=1;j<NZ;j++)
-    if(Math.random()<cfg.pillarChance) box(.5,hFn(i,j),.5,matWall,ox+i*C,fAt(i,j)+hFn(i,j)/2,oz+j*C,{cast:true});
+    if(!skipFloor(i,j)&&Math.random()<cfg.pillarChance) box(.5,hFn(i,j),.5,matWall,ox+i*C,fAt(i,j)+hFn(i,j)/2,oz+j*C,{cast:true});
   if(cfg.lightChance) order.forEach(([i,j])=>{
     if(Math.random()<cfg.lightChance) lightPanel(ox+i*C+C/2,fAt(i,j)+hFn(i,j)-.06,oz+j*C+C/2,C*.5,C*.5,Math.random()<.12);
   });
@@ -1184,12 +1191,18 @@ function buildPool(){
   // bande à plafond haut (atrium) — position aléatoire à chaque génération
   const atriumI0=3+((Math.random()*(NX-8))|0), atriumW=3+((Math.random()*3)|0);
   const hAt=(i)=>(i>=atriumI0&&i<atriumI0+atriumW)?H2:H;
-  const grid=genDungeon(NX,NZ,{extraOpen:.32,elevChance:0,maxElev:0});
-  const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
-    pillarChance:.05,lightChance:.18,weirdChance:.2});
   // zone inondée : rectangle de cellules contigu, creusé en piscine enterrée sous le niveau du sol
+  // (calculée AVANT la génération du sol pour que ces cellules soient laissées creuses — sans ça
+  // le carrelage plat masquait entièrement la piscine et on tombait dedans sans la voir)
   const fx0=2+((Math.random()*(NX-9))|0), fz0=1+((Math.random()*(NZ-6))|0);
   const fw=4+((Math.random()*3)|0), fd=3+((Math.random()*3)|0);
+  const inFlood=(i,j)=>i>=fx0&&i<fx0+fw&&j>=fz0&&j<fz0+fd;
+  const grid=genDungeon(NX,NZ,{extraOpen:.32,elevChance:0,maxElev:0});
+  // une seule piscine ouverte, sans mur intérieur qui la couperait en compartiments
+  for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++) if(inFlood(i-1,j)&&inFlood(i,j)) grid.vw[i][j]=false;
+  for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++) if(inFlood(i,j-1)&&inFlood(i,j)) grid.hw[i][j]=false;
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
+    pillarChance:.05,lightChance:.18,weirdChance:.2,skipFloor:inFlood});
   const wminx=ox+fx0*C, wmaxx=ox+(fx0+fw)*C, wminz=oz+fz0*C, wmaxz=oz+(fz0+fd)*C;
   waterBounds={minx:wminx,maxx:wmaxx,minz:wminz,maxz:wmaxz};
   const dcx=(wminx+wmaxx)/2, dcz=(wminz+wmaxz)/2;
@@ -2053,7 +2066,17 @@ const HOT=[
   {icon:'🔋',name:'Batterie',qty:()=>S.batteries,use:()=>{ if(S.batteries>0&&battery<95){S.batteries--;battery=100;toast('Batterie remplacée');blip(700,.1,.1);} }},
   {icon:'📷',name:'Caméra',use:()=>takePhoto()},
   {icon:'✚',name:'Medkit',qty:()=>S.medkits,use:()=>{ if(S.medkits>0&&S.hp<100){S.medkits--;S.hp=clamp(S.hp+50,0,100);toast('Soins appliqués');blip(600,.2,.1);} }},
-  {icon:'📻',name:'Radio',use:()=>{ blip(rand(300,900),.4,.06,'square'); toast('« …tchhh… base Thêta, on vous reçoit… tchhh »'); }},
+  {icon:'📻',name:'Radio',use:()=>{
+    blip(rand(300,900),.4,.06,'square');
+    if(mission&&currentLevel!=='hub'){
+      const left=mission.total-mission.progress;
+      toast(left>0
+        ? `« …tchhh… base Thêta, il vous reste ${left} objectif${left>1?'s':''}… tchhh »`
+        : '« …tchhh… objectifs remplis, revenez à l\'ascenseur… tchhh »');
+    } else {
+      toast(`« …tchhh… base Thêta, ${S.credits} crédits en réserve, niveau ${S.lv}… tchhh »`);
+    }
+  }},
   {icon:'🧭',name:'Boussole',use:()=>toggleCompass()},
 ];
 function buildHotbar(){
@@ -2150,6 +2173,25 @@ function bindInput(){
     if(document.pointerLockElement===cv){
       player.yaw-=e.movementX*.0022;
       player.pitch=clamp(player.pitch-e.movementY*.0022,-1.45,1.45);
+      // curseur virtuel : sous pointer lock, clientX/Y du navigateur reste figé au point de
+      // verrouillage — sans ce suivi manuel par delta, cliquer sur la barre d'objets pendant
+      // qu'on joue ne touche jamais le bon élément (le clic « ne fait rien »).
+      if(vcx===null){vcx=innerWidth/2;vcy=innerHeight-40;}
+      vcx=clamp(vcx+e.movementX,0,innerWidth); vcy=clamp(vcy+e.movementY,0,innerHeight);
+      const nearHotbar=vcy>innerHeight-100;
+      const vc=$('vcursor');
+      vc.classList.toggle('on',nearHotbar);
+      if(nearHotbar){ vc.style.left=vcx+'px'; vc.style.top=vcy+'px'; }
+    }
+  });
+  cv.addEventListener('mousedown',e=>{
+    if(document.pointerLockElement===cv&&vcx!==null&&vcy>innerHeight-100){
+      const el=document.elementFromPoint(vcx,vcy);
+      const slot=el&&el.closest('.slot');
+      if(slot){
+        const idx=[...$('hotbar').children].indexOf(slot);
+        if(idx>=0&&HOT[idx]){ HOT[idx].use(); updateHUD(); }
+      }
     }
   });
   if(IS_TOUCH){
@@ -2194,6 +2236,7 @@ function bindInput(){
 }
 const joy={x:0,y:0};
 let currentInteract=null;
+let vcx=null,vcy=null; // curseur virtuel (clics sur la barre d'objets pendant que le pointeur est verrouillé)
 function tryInteract(){ if(currentInteract) currentInteract.fn(); }
 
 /* ---------------- terminal UI ---------------- */
