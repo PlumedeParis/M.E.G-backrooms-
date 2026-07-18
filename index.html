@@ -433,13 +433,40 @@ function thunk(vol){
   g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.5);
   s.connect(f);f.connect(g);g.connect(AU.master); s.start(); s.stop(c.currentTime+.6);
 }
-function footstep(inWater){
+// pas au sol : timbre différent selon la surface (eau, métal, moquette, bois, dur/carrelage)
+const LEVEL_FLOOR={hub:'carpet',lobby:'carpet',pool:'tile',lights:'concrete',elec:'metal',
+  mall:'carpet',hotel:'carpet',metro:'metal',offices:'carpet',frozen:'concrete',
+  library:'wood',observatory:'metal',exit:'concrete'};
+function footstep(surface){
   if(!AU.ctx)return; const c=AU.ctx,s=c.createBufferSource(); s.buffer=noiseBuf();
-  const f=c.createBiquadFilter(); f.type=inWater?'lowpass':'bandpass';
-  f.frequency.value=inWater?420:900+Math.random()*300; f.Q.value=1.2;
-  const g=c.createGain(); g.gain.setValueAtTime(inWater?.22:.09,c.currentTime);
-  g.gain.exponentialRampToValueAtTime(.001,c.currentTime+(inWater?.3:.12));
-  s.connect(f);f.connect(g);g.connect(AU.master); s.start(); s.stop(c.currentTime+.35);
+  const f=c.createBiquadFilter(),g=c.createGain(),t0=c.currentTime;
+  s.connect(f);f.connect(g);g.connect(AU.master);
+  if(surface==='water'){
+    f.type='lowpass'; f.frequency.value=420; f.Q.value=1.2;
+    g.gain.setValueAtTime(.22,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.3);
+    s.start(); s.stop(t0+.35); return;
+  }
+  if(surface==='metal'){
+    f.type='highpass'; f.frequency.value=850; f.Q.value=3.2;
+    g.gain.setValueAtTime(.1,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.2);
+    s.start(); s.stop(t0+.25);
+    blip(rand(1800,2600),.08,.03,'sine'); // petite résonance métallique
+    return;
+  }
+  if(surface==='carpet'){
+    f.type='lowpass'; f.frequency.value=280; f.Q.value=.7;
+    g.gain.setValueAtTime(.045,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.1);
+    s.start(); s.stop(t0+.15); return;
+  }
+  if(surface==='wood'){
+    f.type='bandpass'; f.frequency.value=500; f.Q.value=1.6;
+    g.gain.setValueAtTime(.08,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.14);
+    s.start(); s.stop(t0+.18); return;
+  }
+  // dur / carrelage / béton (par défaut)
+  f.type='bandpass'; f.frequency.value=900+Math.random()*300; f.Q.value=1.2;
+  g.gain.setValueAtTime(.09,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.12);
+  s.start(); s.stop(t0+.35);
 }
 
 /* ---------------- textures procédurales ---------------- */
@@ -1049,48 +1076,58 @@ function buildPool(){
   renderer.setClearColor(0x2e3638);
   scene.add(new THREE.AmbientLight(0xd6e0e2,.07));
   scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.05));
-  const H=5.4;
+  const H=5.4, H2=9.2; // hauteur standard / hauteur du hall central — plafond plus haut par endroits
   // trois halls en enfilade sur X : [-30..-6] [-2..26] [30..54], couloirs entre
-  const halls=[{x:-18,z:0,w:24,d:22},{x:12,z:0,w:28,d:26},{x:42,z:0,w:20,d:20}];
+  const halls=[{x:-18,z:0,w:24,d:22,h:H},{x:12,z:0,w:28,d:26,h:H2},{x:42,z:0,w:20,d:20,h:H}];
   const doorW=4;
   const all={minx:-31,maxx:53,minz:-14,maxz:14};
-  // sol / plafond globaux
+  // sol global (le plafond est reconstruit par section plus bas, hauteur variable)
   box(96,.2,34,MAT.tile,11,-.1,0,{col:false});
-  box(96,.2,34,MAT.tile,11,H,0,{col:false});
-  function wallX(x,z1,z2){ box(.4,H,z2-z1,MAT.tile,x,H/2,(z1+z2)/2); }
-  function wallZ(z,x1,x2){ box(x2-x1,H,.4,MAT.tile,(x1+x2)/2,H/2,z); }
+  function wallX(x,z1,z2,h){ box(.4,h,z2-z1,MAT.tile,x,h/2,(z1+z2)/2); }
+  function wallZ(z,x1,x2,h){ box(x2-x1,h,.4,MAT.tile,(x1+x2)/2,h/2,z); }
   halls.forEach((h,idx)=>{
     const x1=h.x-h.w/2,x2=h.x+h.w/2,z1=h.z-h.d/2,z2=h.z+h.d/2;
-    wallZ(z1,x1,x2); wallZ(z2,x1,x2);
+    wallZ(z1,x1,x2,h.h); wallZ(z2,x1,x2,h.h);
     // murs X avec porte au centre (sauf extrémités)
     const gap=doorW/2;
-    if(idx===0)wallX(x1,z1,z2); else {wallX(x1,z1,-gap);wallX(x1,gap,z2);}
-    if(idx===halls.length-1)wallX(x2,z1,z2); else {wallX(x2,z1,-gap);wallX(x2,gap,z2);}
+    if(idx===0)wallX(x1,z1,z2,h.h); else {wallX(x1,z1,-gap,h.h);wallX(x1,gap,z2,h.h);}
+    if(idx===halls.length-1)wallX(x2,z1,z2,h.h); else {wallX(x2,z1,-gap,h.h);wallX(x2,gap,z2,h.h);}
+    // plafond de la section
+    box(x2-x1,.2,z2-z1,MAT.tile,h.x,h.h,h.z,{col:false});
     // piliers
     for(let px=x1+4;px<x2-2;px+=6)for(let pz=z1+4;pz<z2-2;pz+=7)
-      if(Math.random()<.75) box(1.1,H,1.1,MAT.tile,px,H/2,pz,{cast:true});
+      if(Math.random()<.75) box(1.1,h.h,1.1,MAT.tile,px,h.h/2,pz,{cast:true});
     // petites lampes plafond — clairsemées, ambiance sombre et humide
     for(let px=x1+3;px<x2;px+=5)for(let pz=z1+3;pz<z2;pz+=5)
-      if(Math.random()<.3) lightPanel(px,H-.06,pz,.7,.7,Math.random()<.15);
+      if(Math.random()<.3) lightPanel(px,h.h-.06,pz,.7,.7,Math.random()<.15);
   });
-  // couloirs entre halls
-  wallZ(-doorW/2, -6, -2); wallZ(doorW/2, -6, -2);
-  wallZ(-doorW/2, 26, 32); wallZ(doorW/2, 26, 32);
-  pointLight(-18,H-1,0,0xdfeaec,.2,11);
-  pointLight(12,H-1,0,0xdfeaec,.22,12);
-  pointLight(42,H-1,0,0xdfeaec,.2,10);
+  // couloirs entre halls (hauteur standard, plus bas que le hall central — effet tunnel → atrium)
+  wallZ(-doorW/2, -6, -2, H); wallZ(doorW/2, -6, -2, H);
+  wallZ(-doorW/2, 26, 32, H); wallZ(doorW/2, 26, 32, H);
+  box(4,.2,doorW,MAT.tile,-4,H,0,{col:false});
+  box(6,.2,doorW,MAT.tile,29,H,0,{col:false});
+  pointLight(-18,halls[0].h-1,0,0xdfeaec,.2,11);
+  pointLight(12,halls[1].h-1,0,0xdfeaec,.24,14);
+  pointLight(42,halls[2].h-1,0,0xdfeaec,.2,10);
   // eau — teinte plus sombre, reflets et spéculaire adoucis pour éviter l'effet miroir éblouissant
-  const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x445c64,shininess:45,
+  const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x5a7986,shininess:70,
     transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
-  waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(96,34),wm);
+  waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(96,34,1,1),wm);
   waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(11,.5,0);
   levelGroup.add(waterMesh);
-  // reflets : cube camera statique
+  // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement)
   const rt=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
-  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(12,1.4,0); scene.add(cc);
-  setTimeout(()=>{waterMesh.visible=false;cc.update(renderer,scene);waterMesh.visible=true;
-    wm.envMap=rt.texture;wm.combine=THREE.MixOperation;wm.reflectivity=.18;wm.needsUpdate=true;},60);
-  updaters.push(dt=>{TX.waterN.offset.x+=dt*.014;TX.waterN.offset.y+=dt*.011;});
+  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(12,1.6,0); scene.add(cc);
+  function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
+    wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
+  setTimeout(refreshReflection,60);
+  let reflectT=0,waterT=0;
+  updaters.push(dt=>{
+    TX.waterN.offset.x+=dt*.02; TX.waterN.offset.y+=dt*.015;
+    waterT+=dt; waterMesh.position.y=.5+Math.sin(waterT*.6)*.03;
+    wm.normalScale.set(.24+Math.sin(waterT*.4)*.07,.24+Math.cos(waterT*.35)*.07);
+    reflectT+=dt; if(reflectT>1.8){ reflectT=0; refreshReflection(); }
+  });
   // passerelles en bois
   const wood=new THREE.MeshStandardMaterial({map:TX.conc,roughness:.9,color:0xc9c2b4});
   function walk(x,z,w,d){ box(w,.14,d,wood,x,.62,z,{col:false,cast:true}); }
@@ -2232,7 +2269,11 @@ const MP=(()=>{
 
   function init(){
     if(!configured||!window.supabase) return;
-    sb=window.supabase.createClient(cfg.url,cfg.anonKey);
+    // stockage de session scopé à l'onglet (sessionStorage) plutôt que localStorage :
+    // localStorage est partagé entre tous les onglets d'un même navigateur, ce qui
+    // donnait la MÊME identité anonyme à deux onglets ouverts pour se tester soi-même
+    // (chacun se filtrait alors lui-même de sa propre liste de joueurs en ligne).
+    sb=window.supabase.createClient(cfg.url,cfg.anonKey,{auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true}});
     loadPseudo();
   }
 
@@ -2243,6 +2284,7 @@ const MP=(()=>{
     $('title').style.display='none';
     $('mpOnline').classList.add('open');
     $('mpPseudoInput').value=pseudo;
+    renderPlayerList(); // évite un panneau bloqué sur "Connexion…" si aucun nouvel événement presence n'arrive
     try{ await ensureAuth(); await subscribePresenceAndInbox(); }catch(e){ console.error(e); }
   }
   function closeOnline(){ $('mpOnline').classList.remove('open'); $('title').style.display='flex'; }
@@ -2578,7 +2620,10 @@ function animate(){
     if(!collides(player.pos.x,player.pos.z+dz))player.pos.z+=dz;
     player.bob+=dt*(run?11:7);
     player.stepT-=dt;
-    if(player.stepT<=0){footstep(player.inWater);player.stepT=run?.32:.48;}
+    if(player.stepT<=0){
+      footstep(player.inWater?'water':(LEVEL_FLOOR[currentLevel]||'concrete'));
+      player.stepT=run?.32:.48;
+    }
   }
   camera.position.set(player.pos.x,
     player.pos.y+Math.sin(player.bob)*.035*(len>0?1:0),
