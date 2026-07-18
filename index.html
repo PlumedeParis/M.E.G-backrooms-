@@ -636,7 +636,8 @@ function buildTextures(){
 /* ---------------- moteur ---------------- */
 let renderer,scene,camera,clock;
 let levelGroup=null, colliders=[], interactables=[], photoTargets=[], updaters=[];
-let waterMesh=null, dust=null, flashlight=null, flCone=null;
+let waterMesh=null, dust=null, flashlight=null, flCone=null, waterBounds=null;
+let terrainSample=null; // fonction (x,z)=>hauteur de sol locale, pour les niveaux à relief (escaliers/plateformes)
 let currentLevel='hub';
 const player={yaw:0,pitch:0,pos:V3(0,1.65,0),speed:3.4,inWater:false,bob:0,stepT:0};
 const keys={};
@@ -823,7 +824,7 @@ function clearLevel(){
   if(levelGroup){scene.remove(levelGroup);
     levelGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
   levelGroup=new THREE.Group(); scene.add(levelGroup);
-  colliders=[]; interactables=[]; photoTargets=[]; updaters=[]; waterMesh=null;
+  colliders=[]; interactables=[]; photoTargets=[]; updaters=[]; waterMesh=null; terrainSample=null; waterBounds=null;
   scene.children.filter(c=>c.isLight&&c!==flashlight).forEach(c=>scene.remove(c));
 }
 function elevatorProp(x,z,ry){
@@ -962,112 +963,152 @@ function mazeGen(N){
   for(let i=0;i<N;i++)for(let j=1;j<N;j++)if(hw[i][j]&&Math.random()<.3)hw[i][j]=false;
   return {vw,hw};
 }
+
+/* ====================================================================
+   GÉNÉRATION PROCÉDURALE PARTAGÉE — utilisée par tous les niveaux
+   de mission. Connexité garantie par construction : le labyrinthe est
+   dérivé d'un arbre couvrant (parcours en profondeur aléatoire), donc
+   chaque cellule visitée est forcément reliée à l'entrée (0,0). Les
+   passages supplémentaires (raccourcis) ne font que RETIRER des murs,
+   jamais en ajouter à un endroit non prévu par la grille : il ne peut
+   donc jamais y avoir de mur flottant ni de zone isolée. Le relief
+   (escaliers/plateformes) suit la même logique : l'altitude n'est
+   propagée que le long des arêtes réellement reliées de cet arbre.
+   ==================================================================== */
+function genDungeon(NX,NZ,opts){
+  opts=opts||{};
+  const extraOpen=opts.extraOpen??.26, elevChance=opts.elevChance??0, maxElev=opts.maxElev??0;
+  const vw=[],hw=[];
+  for(let i=0;i<=NX;i++){vw[i]=[];for(let j=0;j<NZ;j++)vw[i][j]=true;}
+  for(let i=0;i<NX;i++){hw[i]=[];for(let j=0;j<=NZ;j++)hw[i][j]=true;}
+  const vis=Array.from({length:NZ},()=>Array(NX).fill(false));
+  const elev=Array.from({length:NZ},()=>Array(NX).fill(0));
+  const order=[[0,0]];
+  const st=[[0,0]]; vis[0][0]=true;
+  while(st.length){
+    const [x,y]=st[st.length-1];
+    const nb=[[x+1,y,'v',x+1,y],[x-1,y,'v',x,y],[x,y+1,'h',x,y+1],[x,y-1,'h',x,y]]
+      .filter(a=>{const nx=a[0],ny=a[1];return nx>=0&&ny>=0&&nx<NX&&ny<NZ&&!vis[ny][nx];});
+    if(!nb.length){st.pop();continue;}
+    const [nx,ny,t,wi,wj]=nb[(Math.random()*nb.length)|0];
+    if(t==='v')vw[wi][y]=false; else hw[x][wj]=false;
+    let e=elev[y][x];
+    if(maxElev>0&&Math.random()<elevChance) e=clamp(e+(Math.random()<.5?1:-1),0,maxElev);
+    elev[ny][nx]=e;
+    vis[ny][nx]=true; order.push([nx,ny]); st.push([nx,ny]);
+  }
+  // boucles supplémentaires : ne retirent que des murs déjà définis, ne cassent jamais la connexité de l'arbre couvrant
+  for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++)if(vw[i][j]&&Math.random()<extraOpen)vw[i][j]=false;
+  for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++)if(hw[i][j]&&Math.random()<extraOpen)hw[i][j]=false;
+  return {vw,hw,elev,order,NX,NZ};
+}
+function addWeirdChair(x,y,z,mode,ceilY){
+  // décor pur, jamais collidant : ne peut jamais bloquer ou piéger le joueur
+  const m=MAT.wood||MAT.metal;
+  const g=new THREE.Group();
+  const seat=new THREE.Mesh(new THREE.BoxGeometry(.5,.08,.5),m); seat.position.y=.42; g.add(seat);
+  const back=new THREE.Mesh(new THREE.BoxGeometry(.5,.6,.08),m); back.position.set(0,.72,-.21); g.add(back);
+  for(const [dx,dz] of [[-.2,-.2],[.2,-.2],[-.2,.2],[.2,.2]]){
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(.06,.42,.06),MAT.metal); leg.position.set(dx,.21,dz); g.add(leg);
+  }
+  g.rotation.y=rand(0,Math.PI*2);
+  if(mode==='ceiling'){ g.position.set(x,ceilY-.55,z); g.rotation.x=Math.PI; }
+  else { g.position.set(x,y-.55,z); }
+  levelGroup.add(g);
+}
+function buildDungeon(grid,cfg){
+  // cfg: {ox,oz,C,H,hAt(i,j)?,elevStep,matWall,matFloor,matCeil,pillarChance,lightChance,weirdChance}
+  // hAt (optionnel) donne une hauteur de plafond par cellule — sinon H fixe partout (ex: atrium plus haut par endroits).
+  const {vw,hw,elev,NX,NZ,order}=grid;
+  const C=cfg.C,H=cfg.H,ox=cfg.ox,oz=cfg.oz,eS=cfg.elevStep||0;
+  const matFloor=cfg.matFloor,matCeil=cfg.matCeil||cfg.matWall,matWall=cfg.matWall;
+  const hFn=cfg.hAt||(()=>H);
+  const ci=x=>clamp(Math.floor((x-ox)/C),0,NX-1), cj=z=>clamp(Math.floor((z-oz)/C),0,NZ-1);
+  const fAt=(i,j)=>elev[clamp(j,0,NZ-1)][clamp(i,0,NX-1)]*eS;
+  const weird=cfg.weirdChance||0;
+  const invertedSet=new Set();
+  if(weird>0) order.forEach(([i,j])=>{ if((i||j)&&Math.random()<weird*.3) invertedSet.add(i+','+j); });
+  for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++){
+    const fy=fAt(i,j), hy=hFn(i,j), inv=invertedSet.has(i+','+j);
+    box(C,.2,C,inv?matCeil:matFloor,ox+i*C+C/2,fy-.1,oz+j*C+C/2,{col:false});
+    box(C,.2,C,inv?matFloor:matCeil,ox+i*C+C/2,fy+hy,oz+j*C+C/2,{col:false});
+  }
+  for(let i=0;i<=NX;i++)for(let j=0;j<NZ;j++)if(vw[i][j]){
+    const iA=i>0?i-1:i, iB=i<NX?i:i-1;
+    const fA=fAt(iA,j), fB=fAt(iB,j);
+    const bot=Math.min(fA,fB), top=Math.max(fA+hFn(iA,j),fB+hFn(iB,j));
+    box(.32,top-bot,C+.32,matWall,ox+i*C,bot+(top-bot)/2,oz+j*C+C/2,{cast:true});
+  }
+  for(let i=0;i<NX;i++)for(let j=0;j<=NZ;j++)if(hw[i][j]){
+    const jA=j>0?j-1:j, jB=j<NZ?j:j-1;
+    const fA=fAt(i,jA), fB=fAt(i,jB);
+    const bot=Math.min(fA,fB), top=Math.max(fA+hFn(i,jA),fB+hFn(i,jB));
+    box(C+.32,top-bot,.32,matWall,ox+i*C+C/2,bot+(top-bot)/2,oz+j*C,{cast:true});
+  }
+  if(cfg.pillarChance) for(let i=1;i<NX;i++)for(let j=1;j<NZ;j++)
+    if(Math.random()<cfg.pillarChance) box(.5,hFn(i,j),.5,matWall,ox+i*C,fAt(i,j)+hFn(i,j)/2,oz+j*C,{cast:true});
+  if(cfg.lightChance) order.forEach(([i,j])=>{
+    if(Math.random()<cfg.lightChance) lightPanel(ox+i*C+C/2,fAt(i,j)+hFn(i,j)-.06,oz+j*C+C/2,C*.5,C*.5,Math.random()<.12);
+  });
+  if(weird>0) order.forEach(([i,j])=>{
+    if((i||j)&&Math.random()<weird*.1) addWeirdChair(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,Math.random()<.5?'ceiling':'sunk',fAt(i,j)+hFn(i,j));
+  });
+  return {
+    floorAt:(x,z)=>fAt(ci(x),cj(z)),
+    heightAt:(x,z)=>hFn(ci(x),cj(z)),
+    worldOf:(i,j)=>V3(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2),
+    cellOf:(x,z)=>[ci(x),cj(z)],
+    randomCells:(n,minDistFromEntry)=>{
+      const pool=order.filter(([i,j])=>!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry);
+      pool.sort(()=>Math.random()-.5);
+      return pool.slice(0,n);
+    },
+  };
+}
+
 function buildLobby(){
-  const N=9,C=7,H=3.1,ox=-N*C/2,oz=-N*C/2;
+  const NX=18,NZ=18,C=7,H=3.1,ox=-NX*C/2,oz=-NZ*C/2;
   scene.fog=new THREE.FogExp2(0x4a4322,.055);
   renderer.setClearColor(0x4a4322);
-  scene.add(new THREE.AmbientLight(0xccb870,.22));
-  scene.add(new THREE.HemisphereLight(0xd8c580,0x2c2810,.3));
-  const SZ=N*C;
-  box(SZ,.2,SZ,MAT.carpet,0,-.1,0,{col:false});
-  box(SZ,.2,SZ,MAT.ceil,0,H,0,{col:false});
-  const {vw,hw}=mazeGen(N);
-  for(let i=0;i<=N;i++)for(let j=0;j<N;j++)if(vw[i][j])
-    box(.32,H,C+.32,MAT.wall,ox+i*C,H/2,oz+j*C+C/2);
-  for(let i=0;i<N;i++)for(let j=0;j<=N;j++)if(hw[i][j])
-    box(C+.32,H,.32,MAT.wall,ox+i*C+C/2,H/2,oz+j*C);
-  // colonnes
-  for(let i=1;i<N;i++)for(let j=1;j<N;j++)if(Math.random()<.3)
-    box(.6,H,.6,MAT.wall,ox+i*C,H/2,oz+j*C,{cast:true});
-  // néons — beaucoup moins nombreux et plus faibles pour une ambiance sombre
-  let lit=0;
-  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
-    if(Math.random()<.28){
-      const fl=Math.random()<.22;
-      lightPanel(ox+i*C+C/2,H-.06,oz+j*C+C/2,2.2,1.1,fl);
-      if(lit<6&&Math.random()<.3){pointLight(ox+i*C+C/2,H-.5,oz+j*C+C/2,0xffe9b0,.32,8);lit++;}
-    }
-  }
+  scene.add(new THREE.AmbientLight(0xccb870,.2));
+  scene.add(new THREE.HemisphereLight(0xd8c580,0x2c2810,.28));
+  const grid=genDungeon(NX,NZ,{extraOpen:.24,elevChance:.06,maxElev:1});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,elevStep:.4,matWall:MAT.wall,matFloor:MAT.carpet,matCeil:MAT.ceil,
+    pillarChance:.05,lightChance:.22,weirdChance:.5});
+  terrainSample=dungeon.floorAt;
   // spawn + ascenseur cellule (0,0)
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
-  // anomalies photographiables
-  const cells=[]; for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(i+j>4)cells.push([i,j]);
-  cells.sort(()=>Math.random()-.5);
+  // anomalies photographiables, placées sur des cellules réellement reliées et loin de l'entrée
+  const picks=dungeon.randomCells(4,4);
   const anom=[];
-  // 1 : porte suspendue
-  {
-    const [i,j]=cells.pop(); const x=ox+i*C+C/2,z=oz+j*C+C/2;
-    const g=new THREE.Group(); g.position.set(x,1.9,z); g.rotation.y=rand(0,Math.PI);
+  const mk=(i,j,label,fn)=>{ const p=dungeon.worldOf(i,j); fn(p.x,p.z,p.y); anom.push([p.x,p.z,label]); };
+  if(picks[0]) mk(...picks[0],'Porte suspendue',(x,z,fy)=>{
+    const g=new THREE.Group(); g.position.set(x,fy+1.9,z); g.rotation.y=rand(0,Math.PI);
     const fr=new THREE.Mesh(new THREE.BoxGeometry(1.3,2.3,.15),MAT.wall);
-    const inn=new THREE.Mesh(new THREE.BoxGeometry(1,2,.2),MAT.black); 
+    const inn=new THREE.Mesh(new THREE.BoxGeometry(1,2,.2),MAT.black);
     g.add(fr); g.add(inn); levelGroup.add(g);
-    updaters.push(dt=>{g.position.y=1.9+Math.sin(clock.elapsedTime*.8)*.08;});
-    anom.push([x,z,'Porte suspendue']);
-  }
-  // 2 : colonne inversée
-  {
-    const [i,j]=cells.pop(); const x=ox+i*C+C/2,z=oz+j*C+C/2;
-    box(.6,H*.55,.6,MAT.wall,x,H-H*.275,z,{col:false,cast:true});
-    anom.push([x,z,'Colonne inversée']);
-  }
-  // 3 : ligne rouge brisée
-  {
-    const [i,j]=cells.pop(); const x=ox+i*C+C/2,z=oz+j*C+C/2;
+    updaters.push(dt=>{g.position.y=fy+1.9+Math.sin(clock.elapsedTime*.8)*.08;});
+  });
+  if(picks[1]) mk(...picks[1],'Colonne inversée',(x,z,fy)=>
+    box(.6,H*.55,.6,MAT.wall,x,fy+H-H*.275,z,{col:false,cast:true}));
+  if(picks[2]) mk(...picks[2],'Ligne murale anormale',(x,z,fy)=>{
     const m=new THREE.MeshBasicMaterial({color:0x7a1616});
     for(let k=0;k<5;k++){const s=new THREE.Mesh(new THREE.BoxGeometry(.1,.9,.1),m);
-      s.position.set(x-1+k*.5,1+((k%2)*.7),z); s.rotation.z=rand(-.4,.4); levelGroup.add(s);}
-    anom.push([x,z,'Ligne murale anormale']);
-  }
-  // 4 : néon noir
-  {
-    const [i,j]=cells.pop(); const x=ox+i*C+C/2,z=oz+j*C+C/2;
+      s.position.set(x-1+k*.5,fy+1+((k%2)*.7),z); s.rotation.z=rand(-.4,.4); levelGroup.add(s);}
+  });
+  if(picks[3]) mk(...picks[3],'Néon inversé',(x,z,fy)=>{
     const p=new THREE.Mesh(new THREE.PlaneGeometry(2.2,1.1),MAT.black);
-    p.rotation.x=Math.PI/2; p.position.set(x,H-.05,z); levelGroup.add(p);
-    const dk=pointLight(x,H-.7,z,0x000000,0,0); // marqueur logique
-    anom.push([x,z,'Néon inversé']);
-  }
+    p.rotation.x=Math.PI/2; p.position.set(x,fy+H-.05,z); levelGroup.add(p);
+  });
   const spots=anom.map(([x,z])=>V3(x,1.6,z));
   const names=anom.map(([,,n])=>n);
   // le Watcher + le Stalker
-  spawnWatcher(ox,oz,N,C);
-  spawnHostile('stalker',[V3(ox+C,oz+C),V3(ox+N*C-C,oz+N*C-C),V3(ox+C,oz+N*C-C),V3(ox+N*C-C,oz+C)]);
+  const patrol=dungeon.randomCells(6,2).map(([i,j])=>dungeon.worldOf(i,j));
+  spawnWatcher(patrol);
+  spawnHostile('stalker',patrol);
   setupRandomMission('lobby',spots,names);
   ambience({hum:118,humVol:.02,humType:'triangle',noise:.004,noiseF:400});
-}
-function spawnWatcher(ox,oz,N,C){
-  const g=new THREE.Group();
-  const bm=new THREE.MeshBasicMaterial({color:0x050505,transparent:true});
-  const body=new THREE.Mesh(new THREE.CylinderGeometry(.26,.32,1.5,8),bm);
-  body.position.y=.85; const head=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),bm.clone());
-  head.position.y=1.75; g.add(body); g.add(head);
-  const eyeT=tex(64,64,(c,w,h)=>{
-    const gr=c.createRadialGradient(w/2,h/2,1,w/2,h/2,w*.42);
-    gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.5,'rgba(230,240,255,.7)');
-    gr.addColorStop(1,'rgba(255,255,255,0)');c.fillStyle=gr;c.fillRect(0,0,w,h);});
-  const eye=new THREE.Mesh(new THREE.PlaneGeometry(.13,.07),
-    new THREE.MeshBasicMaterial({map:eyeT,transparent:true,depthWrite:false}));
-  eye.position.set(0,1.77,.19); g.add(eye);
-  levelGroup.add(g);
-  let cd=0;
-  const place=()=>{
-    const i=(Math.random()*N)|0,j=(Math.random()*N)|0;
-    g.position.set(ox+i*C+C/2,0,oz+j*C+C/2);
-    body.material.opacity=1; head.material.opacity=1; eye.material.opacity=1; g.visible=true;
-    blip(rand(180,260),.3,.07); // il vient d'apparaître : léger tintement
-  };
-  place();
-  updaters.push(dt=>{
-    cd-=dt;
-    const d=g.position.distanceTo(player.pos);
-    if(g.visible&&d<13){
-      body.material.opacity-=dt*2.4; head.material.opacity-=dt*2.4; eye.material.opacity-=dt*2.4;
-      if(body.material.opacity<=0){g.visible=false;cd=rand(9,18);
-        if(!S.entitiesSeen.watcher){S.entitiesSeen.watcher=true;toast('Entité cataloguée : LE WATCHER');}
-        thunk(.22);}
-    } else if(!g.visible&&cd<=0){place();}
-    if(g.visible)g.lookAt(player.pos.x,g.position.y,player.pos.z);
-  });
 }
 
 /* ========== LEVEL 37 — POOLROOMS ========== */
@@ -1076,48 +1117,29 @@ function buildPool(){
   renderer.setClearColor(0x2e3638);
   scene.add(new THREE.AmbientLight(0xd6e0e2,.07));
   scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.05));
-  const H=5.4, H2=9.2; // hauteur standard / hauteur du hall central — plafond plus haut par endroits
-  // trois halls en enfilade sur X : [-30..-6] [-2..26] [30..54], couloirs entre
-  const halls=[{x:-18,z:0,w:24,d:22,h:H},{x:12,z:0,w:28,d:26,h:H2},{x:42,z:0,w:20,d:20,h:H}];
-  const doorW=4;
-  const all={minx:-31,maxx:53,minz:-14,maxz:14};
-  // sol global (le plafond est reconstruit par section plus bas, hauteur variable)
-  box(96,.2,34,MAT.tile,11,-.1,0,{col:false});
-  function wallX(x,z1,z2,h){ box(.4,h,z2-z1,MAT.tile,x,h/2,(z1+z2)/2); }
-  function wallZ(z,x1,x2,h){ box(x2-x1,h,.4,MAT.tile,(x1+x2)/2,h/2,z); }
-  halls.forEach((h,idx)=>{
-    const x1=h.x-h.w/2,x2=h.x+h.w/2,z1=h.z-h.d/2,z2=h.z+h.d/2;
-    wallZ(z1,x1,x2,h.h); wallZ(z2,x1,x2,h.h);
-    // murs X avec porte au centre (sauf extrémités)
-    const gap=doorW/2;
-    if(idx===0)wallX(x1,z1,z2,h.h); else {wallX(x1,z1,-gap,h.h);wallX(x1,gap,z2,h.h);}
-    if(idx===halls.length-1)wallX(x2,z1,z2,h.h); else {wallX(x2,z1,-gap,h.h);wallX(x2,gap,z2,h.h);}
-    // plafond de la section
-    box(x2-x1,.2,z2-z1,MAT.tile,h.x,h.h,h.z,{col:false});
-    // piliers
-    for(let px=x1+4;px<x2-2;px+=6)for(let pz=z1+4;pz<z2-2;pz+=7)
-      if(Math.random()<.75) box(1.1,h.h,1.1,MAT.tile,px,h.h/2,pz,{cast:true});
-    // petites lampes plafond — clairsemées, ambiance sombre et humide
-    for(let px=x1+3;px<x2;px+=5)for(let pz=z1+3;pz<z2;pz+=5)
-      if(Math.random()<.3) lightPanel(px,h.h-.06,pz,.7,.7,Math.random()<.15);
-  });
-  // couloirs entre halls (hauteur standard, plus bas que le hall central — effet tunnel → atrium)
-  wallZ(-doorW/2, -6, -2, H); wallZ(doorW/2, -6, -2, H);
-  wallZ(-doorW/2, 26, 32, H); wallZ(doorW/2, 26, 32, H);
-  box(4,.2,doorW,MAT.tile,-4,H,0,{col:false});
-  box(6,.2,doorW,MAT.tile,29,H,0,{col:false});
-  pointLight(-18,halls[0].h-1,0,0xdfeaec,.2,11);
-  pointLight(12,halls[1].h-1,0,0xdfeaec,.24,14);
-  pointLight(42,halls[2].h-1,0,0xdfeaec,.2,10);
-  // eau — teinte plus sombre, reflets et spéculaire adoucis pour éviter l'effet miroir éblouissant
+  const NX=16,NZ=12,C=7,H=5.4,H2=9.2,ox=-NX*C/2,oz=-NZ*C/2;
+  // bande à plafond haut (atrium) — position aléatoire à chaque génération
+  const atriumI0=3+((Math.random()*(NX-8))|0), atriumW=3+((Math.random()*3)|0);
+  const hAt=(i)=>(i>=atriumI0&&i<atriumI0+atriumW)?H2:H;
+  const grid=genDungeon(NX,NZ,{extraOpen:.32,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
+    pillarChance:.05,lightChance:.18,weirdChance:.2});
+  terrainSample=dungeon.floorAt;
+  // zone inondée : rectangle de cellules contigu (sol plat, pas de relief, pour une eau cohérente)
+  const fx0=2+((Math.random()*(NX-9))|0), fz0=1+((Math.random()*(NZ-6))|0);
+  const fw=4+((Math.random()*3)|0), fd=3+((Math.random()*3)|0);
+  const wminx=ox+fx0*C, wmaxx=ox+(fx0+fw)*C, wminz=oz+fz0*C, wmaxz=oz+(fz0+fd)*C;
+  waterBounds={minx:wminx,maxx:wmaxx,minz:wminz,maxz:wmaxz};
+  const dcx=(wminx+wmaxx)/2, dcz=(wminz+wmaxz)/2;
+  // eau — teinte sombre, reflets et spéculaire adoucis (évite l'effet miroir éblouissant)
   const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x5a7986,shininess:70,
     transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
-  waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(96,34,1,1),wm);
-  waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(11,.5,0);
+  waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(wmaxx-wminx,wmaxz-wminz,1,1),wm);
+  waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,.5,dcz);
   levelGroup.add(waterMesh);
   // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement)
   const rt=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
-  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(12,1.6,0); scene.add(cc);
+  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,1.6,dcz); scene.add(cc);
   function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
     wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
   setTimeout(refreshReflection,60);
@@ -1128,12 +1150,8 @@ function buildPool(){
     wm.normalScale.set(.24+Math.sin(waterT*.4)*.07,.24+Math.cos(waterT*.35)*.07);
     reflectT+=dt; if(reflectT>1.8){ reflectT=0; refreshReflection(); }
   });
-  // passerelles en bois
-  const wood=new THREE.MeshStandardMaterial({map:TX.conc,roughness:.9,color:0xc9c2b4});
-  function walk(x,z,w,d){ box(w,.14,d,wood,x,.62,z,{col:false,cast:true}); }
-  walk(-18,0,20,2.4); walk(2,0,16,2.4); walk(12,0,2.4,20); walk(29,0,10,2.4); walk(42,0,16,2.4);
-  // emplacements d'objectif (visuel de balise conservé, mission tirée au sort)
-  const spots=[V3(-26,1,7),V3(12,1,-10),V3(47,1,-6)];
+  // emplacements d'objectif — cellules reliées, loin de l'entrée
+  const spots=dungeon.randomCells(3,4).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,p.y+1,p.z); });
   spots.forEach((p,i)=>{
     const b=new THREE.Mesh(new THREE.OctahedronGeometry(.28),
       new THREE.MeshBasicMaterial({color:0xff4d3a}));
@@ -1142,15 +1160,16 @@ function buildPool(){
     updaters.push(dt=>{b.rotation.y+=dt*2;b.position.y=p.y+Math.sin(clock.elapsedTime*2+i)*.15;
       gl.intensity=.6+Math.sin(clock.elapsedTime*5+i)*.35;});
   });
-  // The Drowned — silhouette sous l'eau, surgit si on s'approche trop
+  // The Drowned — patrouille dans la zone inondée, surgit si on s'approche trop en nageant
+  const drR=Math.max(2,Math.min(wmaxx-wminx,wmaxz-wminz)/2*.7);
   const dr=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),
     new THREE.MeshBasicMaterial({color:0x18262c,transparent:true,opacity:.5}));
-  dr.scale.set(1,.4,2.2); dr.position.set(6,.25,5); levelGroup.add(dr);
+  dr.scale.set(1,.4,2.2); dr.position.set(dcx,.25,dcz); levelGroup.add(dr);
   let da=0, drCd=0, drLunging=false;
   updaters.push(dt=>{
     if(drCd>0)drCd-=dt;
     if(!drLunging){
-      da+=dt*.25; dr.position.set(12+Math.cos(da)*9,.22,Math.sin(da)*8);
+      da+=dt*.25; dr.position.set(dcx+Math.cos(da)*drR,.22,dcz+Math.sin(da)*drR);
       const d=dr.position.distanceTo(player.pos);
       if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
         toast('Entité cataloguée : THE DROWNED');thunk(.35);}
@@ -1166,9 +1185,10 @@ function buildPool(){
       }
     }
   });
+  spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   // spawn + ascenseur
-  player.pos.set(-27,1.65,-8); player.yaw=-Math.PI/2.4;
-  elevatorProp(-29.4,-8,Math.PI/2);
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('pool',spots);
   ambience({noise:.012,noiseF:600});
   // gouttes d'eau
@@ -1211,14 +1231,13 @@ function room(x,z,w,d,H,mat,openings){
 function buildLights(){
   scene.fog=new THREE.FogExp2(0x000000,.075);
   renderer.setClearColor(0x000000);
-  scene.add(new THREE.AmbientLight(0x22242e,.22));
-  const H=3.2, m=MAT.concD;
-  room(0,0,12,12,H,m,{n:3,s:3,e:3,w:3});
-  corridor(6,0,29.5,0,3,H,m);   room(34,0,9,9,H,m,{w:3});
-  corridor(-6,0,-29.5,0,3,H,m); room(-34,0,9,9,H,m,{e:3});
-  corridor(0,6,0,29.5,3,H,m);   room(0,34,9,9,H,m,{n:3});
-  corridor(0,-6,0,-29.5,3,H,m); room(0,-34,9,9,H,m,{s:3});
-  // étagères & chariots (comme les captures)
+  scene.add(new THREE.AmbientLight(0x22242e,.2));
+  const NX=17,NZ=17,C=5.2,H=3.2,ox=-NX*C/2,oz=-NZ*C/2;
+  const grid=genDungeon(NX,NZ,{extraOpen:.22,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.concD,matFloor:MAT.concD,matCeil:MAT.concD,
+    pillarChance:.04,lightChance:.05,weirdChance:.3}); // très peu de lumière : c'est "Lights Out"
+  terrainSample=dungeon.floorAt;
+  // étagères & chariots (comme les captures), dispersées dans le labyrinthe
   const shelf=(x,z,ry)=>{ const g=new THREE.Group(); g.position.set(x,0,z); g.rotation.y=ry;
     for(let k=0;k<4;k++){const s=new THREE.Mesh(new THREE.BoxGeometry(2.6,.08,.9),MAT.metal);
       s.position.y=.3+k*.55; s.castShadow=true; g.add(s);}
@@ -1228,18 +1247,17 @@ function buildLights(){
     levelGroup.add(g);
     colliders.push({minx:x-1.4,maxx:x+1.4,minz:z-.6,maxz:z+.6,top:2.2,bot:0});
   };
-  shelf(14,-1,0); shelf(22,1,0); shelf(-3,14,Math.PI/2); shelf(2,22,Math.PI/2);
-  shelf(-16,1,0); shelf(1,-18,Math.PI/2);
-  // mur de briques ponctuel + palettes (capture 1)
-  box(6,H,.4,MAT.brick,-34,H/2,-4.35);
-  // quelques néons quasi morts
-  lightPanel(0,H-.06,0,2,1,true); pointLight(0,H-.6,0,0xffe9b0,.25,7);
-  lightPanel(34,H-.06,0,1.6,.9,true);
-  // emplacements d'objectif (4 salles)
-  const spots=[V3(34,1,0),V3(-34,1,0),V3(0,1,34),V3(0,1,-34)];
-  spawnSmiler([V3(20,0,0),V3(-20,0,0),V3(0,0,20),V3(0,0,-20)]);
-  player.pos.set(0,1.65,2); player.yaw=Math.PI;
-  elevatorProp(0,4.9,Math.PI);
+  dungeon.randomCells(8,3).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,Math.random()<.5?0:Math.PI/2); });
+  // mur de briques ponctuel (décor)
+  const bc=dungeon.randomCells(1,3)[0];
+  if(bc){ const p=dungeon.worldOf(...bc); box(6,H,.4,MAT.brick,p.x,H/2,p.z-2); }
+  lightPanel(ox+C/2,H-.06,oz+C/2,2,1,true); pointLight(ox+C/2,H-.6,oz+C/2,0xffe9b0,.25,7);
+  // emplacements d'objectif
+  const spots=dungeon.randomCells(4,5).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,1,p.z); });
+  spawnHostile('smiler',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('lights',spots);
   ambience({hum:52,humVol:.014,humType:'sine',noise:.003,noiseF:120});
   updaters.push(dt=>{ if(Math.random()<dt*.06){thunk(.12);} });
@@ -1297,6 +1315,10 @@ function drawEntityFace(type,c,w,h,opaque){
     c.beginPath(); c.ellipse(w*.62,h*.42,w*.07,h*.09,0,0,Math.PI*2); c.fill();
     c.fillStyle='rgba(90,130,120,.5)';
     c.beginPath(); c.ellipse(w/2,h*.64,w*.14,h*.05,0,0,Math.PI*2); c.fill();
+  } else if(type==='watcher'){
+    c.fillStyle='rgba(5,6,5,.92)'; c.beginPath(); c.ellipse(w/2,h/2,w*.3,h*.44,0,0,Math.PI*2); c.fill();
+    glow(w/2,h*.46,w*.13,'rgba(255,238,180,.95)');
+    c.fillStyle='#000'; c.beginPath(); c.ellipse(w/2,h*.46,w*.045,h*.06,0,0,Math.PI*2); c.fill();
   }
 }
 function jumpscare(type){
@@ -1382,61 +1404,81 @@ function spawnLostExplorer(zones){
   });
 }
 
+/* ---------------- le Watcher (silhouette immobile, se dissout à l'approche) ---------------- */
+function spawnWatcher(zones){
+  const t=tex(256,256,(c,w,h)=>drawEntityFace('watcher',c,w,h,false));
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,opacity:0}));
+  sp.scale.set(1.5,1.9,1); levelGroup.add(sp);
+  let placed=false, cd=rand(4,9), dissolving=false;
+  const place=()=>{ const z=zones[(Math.random()*zones.length)|0];
+    sp.position.set(z.x+rand(-2,2),1.55,z.z+rand(-2,2));
+    sp.material.opacity=0; placed=true; dissolving=false; };
+  updaters.push(dt=>{
+    if(!placed){ cd-=dt; if(cd<=0)place(); return; }
+    const d=sp.position.distanceTo(player.pos);
+    if(!dissolving){
+      sp.material.opacity=Math.min(.85,sp.material.opacity+dt*.4);
+      if(d<8){
+        if(!S.entitiesSeen.watcher){S.entitiesSeen.watcher=true;toast('Entité cataloguée : LE WATCHER');}
+        if(d<6) dissolving=true;
+      }
+    } else {
+      sp.material.opacity-=dt*1.6;
+      if(sp.material.opacity<=0){ placed=false; cd=rand(10,20); }
+    }
+  });
+}
 
 /* ========== LEVEL 42 — ELECTRICAL STATION ========== */
 function buildElec(){
   scene.fog=new THREE.FogExp2(0x07070a,.05);
   renderer.setClearColor(0x07070a);
-  scene.add(new THREE.AmbientLight(0x2a2c38,.28));
-  const H=5,W=46,D=30;
-  box(W,.2,D,MAT.concD,0,-.1,0,{col:false});
-  box(W,.2,D,MAT.concD,0,H,0,{col:false});
-  box(W,H,.4,MAT.conc,0,H/2,-D/2);
-  box(W,H,.4,MAT.conc,0,H/2,D/2);
-  box(.4,H,D,MAT.conc,-W/2,H/2,0);
-  box(.4,H,D,MAT.conc,W/2,H/2,0);
-  // rangées de machines
-  for(let r=-1;r<=1;r++){
-    for(let x=-16;x<=16;x+=8){
-      if(Math.random()<.85){
-        const mch=box(3.4,2.4,2,MAT.metal,x,1.2,r*8,{cast:true});
-        // petites LED
-        const led=new THREE.Mesh(new THREE.PlaneGeometry(.12,.12),
-          new THREE.MeshBasicMaterial({color:Math.random()<.5?0xff3030:0x30ff50}));
-        led.position.set(x+rand(-1,1),1.7,r*8+1.02); levelGroup.add(led);
-        updaters.push(dt=>{if(Math.random()<dt*2)led.visible=!led.visible;});
-      }
-    }
-  }
+  scene.add(new THREE.AmbientLight(0x2a2c38,.26));
+  const NX=15,NZ=15,C=6,H=5,ox=-NX*C/2,oz=-NZ*C/2;
+  const grid=genDungeon(NX,NZ,{extraOpen:.3,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.conc,matFloor:MAT.concD,matCeil:MAT.concD,
+    pillarChance:.03,lightChance:0,weirdChance:.15});
+  terrainSample=dungeon.floorAt;
+  // rangées de machines dispersées dans le labyrinthe
+  dungeon.randomCells(10,3).forEach(([i,j])=>{
+    const p=dungeon.worldOf(i,j);
+    box(3.4,2.4,2,MAT.metal,p.x,1.2,p.z,{cast:true});
+    const led=new THREE.Mesh(new THREE.PlaneGeometry(.12,.12),
+      new THREE.MeshBasicMaterial({color:Math.random()<.5?0xff3030:0x30ff50}));
+    led.position.set(p.x+rand(-1,1),1.7,p.z+1.02); levelGroup.add(led);
+    updaters.push(dt=>{if(Math.random()<dt*2)led.visible=!led.visible;});
+  });
   // transformateurs cylindriques
-  for(const [tx,tz] of [[-19,-11],[-12,11],[19,10],[14,-11]]){
+  dungeon.randomCells(4,4).forEach(([i,j])=>{
+    const p=dungeon.worldOf(i,j);
     const cyl=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,3.4,14),MAT.metal);
-    cyl.position.set(tx,1.7,tz); cyl.castShadow=true; levelGroup.add(cyl);
-    colliders.push({minx:tx-1.1,maxx:tx+1.1,minz:tz-1.1,maxz:tz+1.1,top:3.4,bot:0});
-  }
+    cyl.position.set(p.x,1.7,p.z); cyl.castShadow=true; levelGroup.add(cyl);
+    colliders.push({minx:p.x-1.1,maxx:p.x+1.1,minz:p.z-1.1,maxz:p.z+1.1,top:3.4,bot:0});
+  });
   // câbles au plafond
-  for(let i=0;i<8;i++){
-    const c=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,W-4,6),MAT.black);
-    c.rotation.z=Math.PI/2; c.position.set(0,H-.3-Math.random()*.5,rand(-D/2+2,D/2-2));
+  for(let i=0;i<10;i++){
+    const c=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,rand(6,14),6),MAT.black);
+    c.rotation.z=Math.PI/2; c.position.set(rand(ox+4,ox+NX*C-4),H-.3-Math.random()*.5,rand(oz+4,oz+NZ*C-4));
     levelGroup.add(c);
   }
   // lumières rouges de secours
-  for(const x of [-18,0,18]){
-    const l=pointLight(x,H-.7,0,0xff4030,.5,10);
-    updaters.push(dt=>{l.intensity=.35+Math.sin(clock.elapsedTime*2+x)*.2;});
-  }
+  dungeon.randomCells(4,2).forEach(([i,j])=>{
+    const p=dungeon.worldOf(i,j);
+    const l=pointLight(p.x,H-.7,p.z,0xff4030,.5,10);
+    updaters.push(dt=>{l.intensity=.35+Math.sin(clock.elapsedTime*2+p.x)*.2;});
+  });
   // générateurs (décor) — la mission active est tirée au sort
-  const gens=[V3(-21,0,-13),V3(0,0,13.4),V3(21,0,13)];
+  const gens=dungeon.randomCells(3,5).map(([i,j])=>dungeon.worldOf(i,j));
   gens.forEach((p)=>{
-    const g=box(2.4,1.8,1.4,MAT.metal,p.x,0.9,p.z,{cast:true});
+    box(2.4,1.8,1.4,MAT.metal,p.x,0.9,p.z,{cast:true});
     const lever=new THREE.Mesh(new THREE.BoxGeometry(.1,.7,.1),
       new THREE.MeshBasicMaterial({color:0xffc040}));
     lever.position.set(p.x,1.9,p.z); lever.rotation.z=.7; levelGroup.add(lever);
   });
   const spots=gens.map(p=>V3(p.x,1.3,p.z));
-  spawnHostile('static',[V3(-10,0,0),V3(10,0,0),V3(0,0,-9)]);
-  player.pos.set(-2,1.65,-12); player.yaw=Math.PI;
-  elevatorProp(-2,-D/2+.45,0);
+  spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('elec',spots);
   ambience({hum:60,humVol:.03,humType:'sawtooth',noise:.004,noiseF:200});
 }
@@ -1445,45 +1487,40 @@ function buildElec(){
 function buildMall(){
   scene.fog=new THREE.FogExp2(0xa89a86,.03);
   renderer.setClearColor(0xa89a86);
-  scene.add(new THREE.AmbientLight(0xcfc0a8,.3));
-  scene.add(new THREE.HemisphereLight(0xd8cbb0,0x5a4c38,.24));
-  const H=4.6,L=90,W=9;
-  box(W,.2,L,MAT.mallFloor,0,-.1,0,{col:false});
-  box(W,.2,L,MAT.mallWall,0,H,0,{col:false});
-  box(W,H,.3,MAT.mallWall,0,H/2,-L/2);
-  box(W,H,.3,MAT.mallWall,0,H/2,L/2);
-  box(.3,H,L,MAT.mallWall,-W/2,H/2,0);
-  box(.3,H,L,MAT.mallWall,W/2,H/2,0);
-  const anom=[];
-  for(let i=-L/2+6;i<L/2-3;i+=6){
-    const side=(Math.random()<.5)?-1:1;
-    box(.15,2.6,3.6,MAT.metal,side*(W/2-.4),1.3,i,{cast:true});
+  scene.add(new THREE.AmbientLight(0xcfc0a8,.28));
+  scene.add(new THREE.HemisphereLight(0xd8cbb0,0x5a4c38,.22));
+  const NX=14,NZ=14,C=8,H=4.6,ox=-NX*C/2,oz=-NZ*C/2;
+  const grid=genDungeon(NX,NZ,{extraOpen:.3,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.mallWall,matFloor:MAT.mallFloor,matCeil:MAT.mallWall,
+    pillarChance:.04,lightChance:.22,weirdChance:.2});
+  terrainSample=dungeon.floorAt;
+  // devantures de boutiques
+  dungeon.randomCells(14,2).forEach(([i,j])=>{
+    const p=dungeon.worldOf(i,j), side=Math.random()<.5?-1:1;
+    box(.15,2.6,3.6,MAT.metal,p.x+side*(C/2-.4),1.3,p.z,{cast:true});
     const signT=tex(256,96,(c,w,h)=>{c.fillStyle='#1a1a1a';c.fillRect(0,0,w,h);
       c.fillStyle=['#e35b8a','#5bb0e3','#e3c15b','#7fdc9e'][(Math.random()*4)|0];
       c.font='bold 30px Courier New';c.textAlign='center';c.fillText('BOUTIQUE',w/2,55);});
     const sign=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1),new THREE.MeshBasicMaterial({map:signT}));
-    sign.position.set(side*(W/2-.42),2.9,i); sign.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(sign);
-    lightPanel(0,H-.06,i,3,1.4,Math.random()<.08);
-    if(anom.length<4 && Math.random()<.3){
-      const names=['Mannequin dédoublé','Caddie qui recule seul','Vitrine sans reflet','Prix figé à 0,00€'];
-      anom.push([0,i,names[anom.length]]);
-    }
-  }
-  while(anom.length<4) anom.push([0,-L/2+8+anom.length*14,'Vitrine anormale']);
-  anom.forEach(([x,z,n])=>{
+    sign.position.set(p.x+side*(C/2-.42),2.9,p.z); sign.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(sign);
+  });
+  // anomalies
+  const anomNames=['Mannequin dédoublé','Caddie qui recule seul','Vitrine sans reflet','Prix figé à 0,00€'];
+  const anom=dungeon.randomCells(4,4).map(([i,j],k)=>{
+    const p=dungeon.worldOf(i,j); return [p.x+rand(-1.2,1.2),p.z,anomNames[k%anomNames.length]];
+  });
+  anom.forEach(([x,z])=>{
     const mk=new THREE.Mesh(new THREE.BoxGeometry(.5,1.7,.4),
       new THREE.MeshStandardMaterial({color:0xd8c9b8,roughness:.6}));
-    mk.position.set(x+rand(-1.2,1.2),.95,z); levelGroup.add(mk);
+    mk.position.set(x,.95,z); levelGroup.add(mk);
   });
-  // atrium central : escalier monumental + anneau de plafond (référence photo)
-  {
-    const az=0; // centre du couloir
-    const steps=10;
-    for(let s=0;s<steps;s++){
-      box(3.4,.18,.42,MAT.conc,0,.09+s*.18,az+2.4-s*.42,{col:s<3,cast:true});
-    }
-    box(1.7,H-.4,1.7,MAT.conc,-2.6,H/2-.2,az,{cast:true}); // colonnes de l'atrium
-    box(1.7,H-.4,1.7,MAT.conc,2.6,H/2-.2,az,{cast:true});
+  // atrium : escalier monumental (purement décoratif, jamais collidant) + anneau de plafond
+  const ac=dungeon.randomCells(1,3)[0];
+  if(ac){
+    const p=dungeon.worldOf(...ac), ax=p.x, az=p.z;
+    for(let s=0;s<8;s++) box(3.2,.18,.42,MAT.conc,ax,.09+s*.18,az+1.6-s*.4,{col:false,cast:true});
+    box(1.6,H-.4,1.6,MAT.conc,ax-2.4,H/2-.2,az,{cast:true});
+    box(1.6,H-.4,1.6,MAT.conc,ax+2.4,H/2-.2,az,{cast:true});
     const ringT=tex(512,512,(c,w,h)=>{
       c.fillStyle='#3a3a3e'; c.fillRect(0,0,w,h);
       const cx=w/2,cy=h/2;
@@ -1493,16 +1530,16 @@ function buildMall(){
       c.strokeStyle='rgba(255,238,200,.5)'; c.lineWidth=6;
       c.beginPath(); c.arc(cx,cy,w*.24,0,Math.PI*2); c.stroke();
     });
-    const ring=new THREE.Mesh(new THREE.CircleGeometry(2.6,32),
-      new THREE.MeshBasicMaterial({map:ringT}));
-    ring.rotation.x=Math.PI/2; ring.position.set(0,H-.05,az); levelGroup.add(ring);
-    pointLight(0,H-.4,az,0xffe4b0,.6,10);
+    const ring=new THREE.Mesh(new THREE.CircleGeometry(2.4,32),new THREE.MeshBasicMaterial({map:ringT}));
+    ring.rotation.x=Math.PI/2; ring.position.set(ax,H-.05,az); levelGroup.add(ring);
+    pointLight(ax,H-.4,az,0xffe4b0,.6,10);
   }
   const spots=anom.map(([x,z])=>V3(x,1.5,z));
   const names=anom.map(([,,n])=>n);
-  spawnHostile('mimic',[V3(0,0,-L/2+10),V3(0,0,L/2-10),V3(0,0,0)]);
-  player.pos.set(0,1.65,-L/2+3); player.yaw=0;
-  elevatorProp(0,-L/2+1,0);
+  spawnHostile('mimic',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('faceless',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('mall',spots,names);
   ambience({hum:140,humVol:.01,humType:'sine',noise:.003,noiseF:900});
 }
@@ -1511,32 +1548,29 @@ function buildMall(){
 function buildHotel(){
   scene.fog=new THREE.FogExp2(0x1a0e0e,.045);
   renderer.setClearColor(0x1a0e0e);
-  scene.add(new THREE.AmbientLight(0x3a2018,.3));
-  const H=3.6,L=70,W=4.4;
-  box(W,.2,L,MAT.hotelCarpet,0,-.1,0,{col:false});
-  box(W,.2,L,MAT.hotelWall,0,H,0,{col:false});
-  box(.3,H,L,MAT.hotelWall,-W/2,H/2,0);
-  box(.3,H,L,MAT.hotelWall,W/2,H/2,0);
-  box(W,H,.3,MAT.hotelWall,0,H/2,-L/2);
-  box(W,H,.3,MAT.hotelWall,0,H/2,L/2);
-  const doors=[];
-  for(let z=-L/2+5;z<L/2-3;z+=5){
-    for(const side of [-1,1]){
-      const d=box(.9,2.1,.12,MAT.wood,side*(W/2-.06),1.05,z,{col:false,cast:true});
-      const numT=tex(64,64,(c,w,h)=>{c.fillStyle='#d4b46a';c.font='24px Courier New';c.textAlign='center';
-        c.fillText(((Math.random()*90)|10)+'',w/2,38);});
-      const num=new THREE.Mesh(new THREE.PlaneGeometry(.3,.3),new THREE.MeshBasicMaterial({map:numT}));
-      num.position.set(side*(W/2-.13),1.6,z); num.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(num);
-      doors.push(V3(side*(W/2-.5),1,z));
-    }
-    pointLight(0,H-.5,z,0xffcf9a,.4,6);
-    lightPanel(0,H-.06,z,1.4,.9);
-  }
-  doors.sort(()=>Math.random()-.5);
+  scene.add(new THREE.AmbientLight(0x3a2018,.28));
+  // grille étroite et allongée : peu de raccourcis, ça reste un couloir qui semble ne jamais finir
+  const NX=6,NZ=26,C=4.4,H=3.6,ox=-NX*C/2,oz=-NZ*C/2;
+  const grid=genDungeon(NX,NZ,{extraOpen:.14,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.hotelWall,matFloor:MAT.hotelCarpet,matCeil:MAT.hotelWall,
+    pillarChance:0,lightChance:.14,weirdChance:.22});
+  terrainSample=dungeon.floorAt;
+  // portes numérotées (accent + points de mission), dispersées le long des couloirs
+  const doors=dungeon.randomCells(10,3).map(([i,j])=>{
+    const p=dungeon.worldOf(i,j), side=Math.random()<.5?-1:1;
+    box(.9,2.1,.12,MAT.wood,p.x+side*(C/2-.06),1.05,p.z,{col:false,cast:true});
+    const numT=tex(64,64,(c,w,h)=>{c.fillStyle='#d4b46a';c.font='24px Courier New';c.textAlign='center';
+      c.fillText(((Math.random()*90)|10)+'',w/2,38);});
+    const num=new THREE.Mesh(new THREE.PlaneGeometry(.3,.3),new THREE.MeshBasicMaterial({map:numT}));
+    num.position.set(p.x+side*(C/2-.13),1.6,p.z); num.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(num);
+    return V3(p.x+side*(C/2-.5),1,p.z);
+  });
+  dungeon.randomCells(9,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); pointLight(p.x,H-.5,p.z,0xffcf9a,.4,6); });
   const spots=doors.slice(0,3);
-  spawnHostile('faceless',[V3(0,0,-L/2+12),V3(0,0,L/2-12)]);
-  player.pos.set(0,1.65,-L/2+3); player.yaw=0;
-  elevatorProp(0,-L/2+1,0);
+  spawnHostile('faceless',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnLostExplorer(dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-1.4,0);
   setupRandomMission('hotel',spots);
   ambience({hum:70,humVol:.018,humType:'sine',noise:.006,noiseF:300});
   updaters.push(dt=>{ if(Math.random()<dt*.04) blip(rand(300,500),.4,.08); }); // tic-tac lointain
@@ -1546,16 +1580,18 @@ function buildHotel(){
 function buildMetro(){
   scene.fog=new THREE.FogExp2(0x0a0c0e,.038);
   renderer.setClearColor(0x0a0c0e);
-  scene.add(new THREE.AmbientLight(0x3a4048,.26));
-  const H=4.8,L=60,platW=7,trackW=4;
+  scene.add(new THREE.AmbientLight(0x3a4048,.24));
+  const H=4.8,L=54+((Math.random()*30)|0),platW=7,trackW=4,gap=4,Wt=platW*2+trackW;
   box(platW,.2,L,MAT.metro,-platW/2-trackW/2,-.1,0,{col:false});
   box(platW,.2,L,MAT.metro,platW/2+trackW/2,-.1,0,{col:false});
   box(trackW,.05,L,MAT.black,0,-.14,0,{col:false});
-  box(platW*2+trackW,.2,L,MAT.metro,0,H,0,{col:false});
+  box(Wt,.2,L,MAT.metro,0,H,0,{col:false});
   box(.3,H,L,MAT.metro,-platW-trackW/2,H/2,0);
   box(.3,H,L,MAT.metro,platW+trackW/2,H/2,0);
-  box(platW*2+trackW,H,.3,MAT.metro,0,H/2,-L/2);
-  box(platW*2+trackW,H,.3,MAT.metro,0,H/2,L/2);
+  box(Wt,H,.3,MAT.metro,0,H/2,-L/2);
+  // mur nord percé d'une ouverture centrale vers des couloirs de service annexes
+  (function(x1,x2,z){box(x2-x1,H,.3,MAT.metro,(x1+x2)/2,H/2,z);})(-Wt/2,-gap/2,L/2);
+  (function(x1,x2,z){box(x2-x1,H,.3,MAT.metro,(x1+x2)/2,H/2,z);})(gap/2,Wt/2,L/2);
   // rame à l'arrêt (silhouette)
   const train=box(trackW-.4,2.2,L-8,new THREE.MeshStandardMaterial({map:TX.metal,color:0x30363d,roughness:.6,metalness:.6}),
     0,1.1,0,{col:false,cast:true});
@@ -1585,15 +1621,23 @@ function buildMetro(){
       pointLight(px+side*.3,1.6,z,0xfff2d0,.25,3);
     }
   }
-  // emplacements d'objectif (effets personnels décoratifs)
-  const spots=[V3(-platW-trackW/2+1.4,.6,-L/2+14),V3(platW+trackW/2-1.4,.6,2),V3(-platW-trackW/2+1.6,.6,L/2-12)];
+  // couloirs de service annexes au bout du quai — labyrinthe rattaché, connexion garantie
+  // (le mur nord est percé exactement à cet endroit, quel que soit le tirage aléatoire du labyrinthe)
+  const aNX=7,aNZ=9,aC=gap,ai0=aNX>>1,aox=-(ai0*aC+aC/2),aoz=L/2;
+  const agrid=genDungeon(aNX,aNZ,{extraOpen:.24,elevChance:0,maxElev:0});
+  agrid.hw[ai0][0]=false;
+  const annex=buildDungeon(agrid,{ox:aox,oz:aoz,C:aC,H:3.6,matWall:MAT.metro,matFloor:MAT.concD,matCeil:MAT.concD,
+    pillarChance:.03,lightChance:.12,weirdChance:.25});
+  // emplacements d'objectif (effets personnels décoratifs) — un sur le quai, deux dans l'annexe
+  const spots=[V3(-platW-trackW/2+1.4,.6,-L/2+14),
+    ...annex.randomCells(2,2).map(([i,j])=>{ const p=annex.worldOf(i,j); return V3(p.x,.6,p.z); })];
   spots.forEach((p,i)=>{
     const it=new THREE.Mesh(new THREE.BoxGeometry(.3,.15,.4),new THREE.MeshStandardMaterial({color:0x8a6a3a,roughness:.7}));
     it.position.copy(p); levelGroup.add(it);
     const gl=pointLight(p.x,p.y+.3,p.z,0xffd9a0,.5,4);
     updaters.push(dt=>{it.rotation.y+=dt*.6;gl.intensity=.35+Math.sin(clock.elapsedTime*3+i)*.2;});
   });
-  spawnHostile('conductor',[V3(0,0,-L/2+20),V3(0,0,L/2-20)]);
+  spawnHostile('conductor',[V3(0,0,-L/2+20),V3(0,0,L/2-20),...annex.randomCells(2,2).map(([i,j])=>annex.worldOf(i,j))]);
   spawnLostExplorer([V3(-platW/2-trackW/2,0,0),V3(platW/2+trackW/2,0,10)]);
   player.pos.set(-platW/2-trackW/2,1.65,-L/2+4); player.yaw=0;
   elevatorProp(-platW-trackW/2+1,-L/2+2,0);
@@ -1604,45 +1648,39 @@ function buildMetro(){
 
 /* ========== LEVEL 8 — CRIMSON OFFICES ========== */
 function buildOffices(){
-  const N=7,C=6,H=2.8,ox=-N*C/2,oz=-N*C/2;
+  const NX=16,NZ=16,C=6,H=2.8,ox=-NX*C/2,oz=-NZ*C/2;
   scene.fog=new THREE.FogExp2(0x2a0f0f,.05);
   renderer.setClearColor(0x2a0f0f);
-  scene.add(new THREE.AmbientLight(0x5a2020,.26));
-  scene.add(new THREE.HemisphereLight(0x8a3a3a,0x1a0808,.32));
-  const SZ=N*C;
-  box(SZ,.2,SZ,MAT.crimsonFloor,0,-.1,0,{col:false});
-  box(SZ,.2,SZ,MAT.officeCeil,0,H,0,{col:false});
-  const {vw,hw}=mazeGen(N);
-  for(let i=0;i<=N;i++)for(let j=0;j<N;j++)if(vw[i][j])
-    box(.3,H,C+.3,MAT.crimson,ox+i*C,H/2,oz+j*C+C/2);
-  for(let i=0;i<N;i++)for(let j=0;j<=N;j++)if(hw[i][j])
-    box(C+.3,H,.3,MAT.crimson,ox+i*C+C/2,H/2,oz+j*C);
-  // porte de sortie balisée (référence photo)
+  scene.add(new THREE.AmbientLight(0x5a2020,.24));
+  scene.add(new THREE.HemisphereLight(0x8a3a3a,0x1a0808,.3));
+  const grid=genDungeon(NX,NZ,{extraOpen:.26,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.crimson,matFloor:MAT.crimsonFloor,matCeil:MAT.officeCeil,
+    pillarChance:.03,lightChance:.32,weirdChance:.3});
+  terrainSample=dungeon.floorAt;
+  // porte de sortie balisée, sur une cellule éloignée de l'entrée (référence photo)
   {
+    const ec=dungeon.randomCells(1,9)[0]||[NX-1,NZ-1]; const p=dungeon.worldOf(...ec);
     const dT=tex(128,180,(c,w,h)=>{c.fillStyle='#5a4530';c.fillRect(0,0,w,h);
       c.fillStyle='#c94a3a';c.fillRect(w*.32,10,w*.36,18); // panneau lumineux rouge
       c.fillStyle='#eee';c.font='11px Courier New';c.textAlign='center';c.fillText('EXIT',w/2,24);});
     const dm=new THREE.Mesh(new THREE.PlaneGeometry(1,1.4),new THREE.MeshBasicMaterial({map:dT}));
-    dm.position.set(ox+SZ-1.2,.9,oz+SZ-1.2); dm.rotation.y=Math.PI; levelGroup.add(dm);
-    pointLight(ox+SZ-1.2,1.9,oz+SZ-1.2,0xff4030,.4,3);
+    dm.position.set(p.x,.9,p.z); dm.rotation.y=Math.PI; levelGroup.add(dm);
+    pointLight(p.x,1.9,p.z,0xff4030,.4,3);
   }
-  let lit=0;
-  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
-    if(Math.random()<.4){lightPanel(ox+i*C+C/2,H-.06,oz+j*C+C/2,2,1,Math.random()<.2);
-      if(lit<8&&Math.random()<.4){pointLight(ox+i*C+C/2,H-.5,oz+j*C+C/2,0xff5a4a,.4,8);lit++;}}
-    if(Math.random()<.35) box(1.2,.75,.6,MAT.metal,ox+i*C+C/2+rand(-1.5,1.5),.38,oz+j*C+C/2+rand(-1.5,1.5),{cast:true}); // bureaux
-  }
-  const cells=[]; for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(i+j>3)cells.push([i,j]);
-  cells.sort(()=>Math.random()-.5);
-  const names=['Dossier qui se réécrit seul','Téléphone décroché sans ligne','Chaise tournant seule','Horloge à rebours'];
-  const spots=[];
-  names.forEach((n,k)=>{
-    const [i,j]=cells.pop(); const x=ox+i*C+C/2,z=oz+j*C+C/2;
-    const p=new THREE.Mesh(new THREE.PlaneGeometry(1,1.3),new THREE.MeshBasicMaterial({color:0x220a0a}));
-    p.rotation.x=Math.PI/2; p.position.set(x,H-.05,z); levelGroup.add(p);
-    spots.push(V3(x,1.4,z));
+  // bureaux dispersés
+  dungeon.randomCells(24,2).forEach(([i,j])=>{
+    const p=dungeon.worldOf(i,j);
+    box(1.2,.75,.6,MAT.metal,p.x+rand(-1.5,1.5),.38,p.z+rand(-1.5,1.5),{cast:true});
   });
-  spawnHostile('stalker',[V3(ox+C,oz+C),V3(ox+SZ-C,oz+SZ-C),V3(ox+C,oz+SZ-C)]);
+  const names=['Dossier qui se réécrit seul','Téléphone décroché sans ligne','Chaise tournant seule','Horloge à rebours'];
+  const spots=dungeon.randomCells(4,5).map(([i,j])=>{
+    const p=dungeon.worldOf(i,j);
+    const pl=new THREE.Mesh(new THREE.PlaneGeometry(1,1.3),new THREE.MeshBasicMaterial({color:0x220a0a}));
+    pl.rotation.x=Math.PI/2; pl.position.set(p.x,H-.05,p.z); levelGroup.add(pl);
+    return V3(p.x,1.4,p.z);
+  });
+  spawnHostile('stalker',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('mimic',dungeon.randomCells(3,5).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('offices',spots,names);
@@ -1653,34 +1691,31 @@ function buildOffices(){
 function buildFrozen(){
   scene.fog=new THREE.FogExp2(0x8fa8b8,.06);
   renderer.setClearColor(0x8fa8b8);
-  scene.add(new THREE.AmbientLight(0xaecde0,.3));
-  scene.add(new THREE.HemisphereLight(0xc0dcec,0x3a4c58,.24));
-  const H=3.3, m=MAT.frozen;
-  room(0,0,12,12,H,m,{n:3,s:3,e:3,w:3});
-  corridor(6,0,29.5,0,3,H,m);   room(34,0,9,9,H,m,{w:3});
-  corridor(-6,0,-29.5,0,3,H,m); room(-34,0,9,9,H,m,{e:3});
-  corridor(0,6,0,29.5,3,H,m);   room(0,34,9,9,H,m,{n:3});
-  corridor(0,-6,0,-29.5,3,H,m); room(0,-34,9,9,H,m,{s:3});
-  // remplacer les sols par la variante givrée (par-dessus, fine couche)
-  [[0,0],[34,0],[-34,0],[0,34],[0,-34]].forEach(([x,z])=>box(9,.02,9,MAT.frozenFloor,x,0.01,z,{col:false}));
-  pointLight(0,H-.5,0,0xcfe9ff,.5,10);
-  // stalactites de glace (référence photo)
+  scene.add(new THREE.AmbientLight(0xaecde0,.28));
+  scene.add(new THREE.HemisphereLight(0xc0dcec,0x3a4c58,.22));
+  const NX=16,NZ=16,C=5.4,H=3.3,ox=-NX*C/2,oz=-NZ*C/2;
+  const grid=genDungeon(NX,NZ,{extraOpen:.24,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.frozen,matFloor:MAT.frozenFloor,matCeil:MAT.frozen,
+    pillarChance:.03,lightChance:.14,weirdChance:.2});
+  terrainSample=dungeon.floorAt;
+  pointLight(ox+C/2,H-.5,oz+C/2,0xcfe9ff,.5,10);
+  // stalactites de glace, dispersées (référence photo)
   const iceMat=new THREE.MeshStandardMaterial({color:0xcfeaf7,roughness:.15,metalness:.05,transparent:true,opacity:.85});
   const icicle=(x,z)=>{
     const len=rand(.4,1.1);
     const ic=new THREE.Mesh(new THREE.ConeGeometry(rand(.06,.14),len,6),iceMat);
     ic.position.set(x,H-len/2,z); levelGroup.add(ic);
   };
-  const rooms=[[0,0],[34,0],[-34,0],[0,34],[0,-34]];
-  rooms.forEach(([rx,rz])=>{ for(let k=0;k<6;k++) icicle(rx+rand(-3.5,3.5),rz+rand(-3.5,3.5)); });
-  const gens=[V3(34,0,0),V3(-34,0,0),V3(0,0,34)];
+  dungeon.randomCells(26,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); icicle(p.x+rand(-1.5,1.5),p.z+rand(-1.5,1.5)); });
+  const gens=dungeon.randomCells(3,5).map(([i,j])=>dungeon.worldOf(i,j));
   gens.forEach(p=>{ box(1.2,1.4,1.2,MAT.metal,p.x,.7,p.z,{cast:true}); });
   const spots=gens.map(p=>V3(p.x,1,p.z));
-  spawnHostile('static',[V3(20,0,0),V3(-20,0,0),V3(0,0,-20)]);
+  spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('faceless',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
   // souffle de vent / craquements
   updaters.push(dt=>{ if(Math.random()<dt*.15) blip(rand(2000,3200),.15,.04); });
-  player.pos.set(0,1.65,2); player.yaw=Math.PI;
-  elevatorProp(0,4.9,Math.PI);
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('frozen',spots);
   ambience({hum:34,humVol:.02,humType:'sine',noise:.02,noiseF:900});
 }
@@ -1689,24 +1724,22 @@ function buildFrozen(){
 function buildLibrary(){
   scene.fog=new THREE.FogExp2(0x1c140c,.03);
   renderer.setClearColor(0x1c140c);
-  scene.add(new THREE.AmbientLight(0x4a3a24,.3));
-  scene.add(new THREE.HemisphereLight(0xd8c090,0x1a1208,.28));
-  const W=42,D=42,H=4.4;
+  scene.add(new THREE.AmbientLight(0x4a3a24,.28));
+  scene.add(new THREE.HemisphereLight(0xd8c090,0x1a1208,.26));
+  const NX=15,NZ=15,C=6,H=4.4,ox=-NX*C/2,oz=-NZ*C/2;
   const libCarpet=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x2a3a5a});
-  box(W,.2,D,libCarpet,0,-.1,0,{col:false});
-  box(W,.2,D,MAT.ceil,0,H,0,{col:false});
-  box(W,H,.3,MAT.wood,0,H/2,-D/2);
-  box(W,H,.3,MAT.wood,0,H/2,D/2);
-  box(.3,H,D,MAT.wood,-W/2,H/2,0);
-  box(.3,H,D,MAT.wood,W/2,H/2,0);
-  // enseigne ironique (référence photo)
+  const grid=genDungeon(NX,NZ,{extraOpen:.3,elevChance:0,maxElev:0});
+  const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.wood,matFloor:libCarpet,matCeil:MAT.ceil,
+    pillarChance:0,lightChance:.14,weirdChance:.2});
+  terrainSample=dungeon.floorAt;
+  // enseigne ironique près de l'entrée (référence photo)
   {
     const signT=tex(600,140,(c,w,h)=>{c.fillStyle='#1a1208';c.fillRect(0,0,w,h);
       c.fillStyle='#e8c15a';c.font='bold 56px Courier New';c.textAlign='center';
       c.fillText('LA FIN EST PR☉CHE',w/2,88);});
     const sign=new THREE.Mesh(new THREE.PlaneGeometry(7,1.6),new THREE.MeshBasicMaterial({map:signT}));
-    sign.position.set(0,H-1,-D/2+.2); levelGroup.add(sign);
-    pointLight(0,H-1,-D/2+1,0xffdca0,.4,6);
+    sign.position.set(ox+C/2,H-1,oz+C-.4); levelGroup.add(sign);
+    pointLight(ox+C/2,H-1,oz+C-1,0xffdca0,.4,6);
   }
   const shelf=(x,z,ry)=>{ const g=new THREE.Group(); g.position.set(x,0,z); g.rotation.y=ry;
     for(let k=0;k<5;k++){const s=new THREE.Mesh(new THREE.BoxGeometry(3,.1,1),MAT.wood);
@@ -1716,19 +1749,20 @@ function buildLibrary(){
     levelGroup.add(g);
     colliders.push({minx:x-1.6,maxx:x+1.6,minz:z-.6,maxz:z+.6,top:3.1,bot:0});
   };
-  for(let row=-14;row<=14;row+=5){ shelf(row,-10,Math.PI/2); shelf(row,4,Math.PI/2); shelf(row,16,Math.PI/2); }
-  for(let i=0;i<6;i++) lightPanel(rand(-16,16),H-.06,rand(-16,16),2,1);
-  pointLight(0,H-1,0,0xd8b878,.5,20);
-  const spots=[V3(-11,1,-10),V3(4,1,10),V3(12,1,-3)];
+  dungeon.randomCells(16,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,Math.random()<.5?0:Math.PI/2); });
+  pointLight(ox+C/2,H-1,oz+C/2,0xd8b878,.5,20);
+  const spots=dungeon.randomCells(3,5).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,1,p.z); });
   spots.forEach((p,i)=>{
-    const bk=new THREE.Mesh(new THREE.BoxGeometry(.3,.4,.06),new THREE.MeshStandardMaterial({color:[0x7a2020,0x1f4a2a,0x2a2a6a][i],roughness:.7}));
+    const bk=new THREE.Mesh(new THREE.BoxGeometry(.3,.4,.06),
+      new THREE.MeshStandardMaterial({color:[0x7a2020,0x1f4a2a,0x2a2a6a][i%3],roughness:.7}));
     bk.position.copy(p); levelGroup.add(bk);
     const gl=pointLight(p.x,p.y+.3,p.z,0xd8b878,.5,4);
     updaters.push(dt=>{bk.rotation.y+=dt*.8;gl.intensity=.35+Math.sin(clock.elapsedTime*3+i)*.2;});
   });
-  spawnHostile('faceless',[V3(-11,0,4),V3(11,0,-4)]);
-  player.pos.set(0,1.65,-18); player.yaw=Math.PI;
-  elevatorProp(0,-19.5,Math.PI);
+  spawnHostile('faceless',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
+  elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('library',spots);
   ambience({hum:38,humVol:.012,humType:'sine',noise:.008,noiseF:500});
   updaters.push(dt=>{ if(Math.random()<dt*.08) blip(rand(150,260),.3,.08); }); // pages qui tournent
@@ -1738,8 +1772,8 @@ function buildLibrary(){
 function buildObservatory(){
   scene.fog=new THREE.FogExp2(0x05060c,.02);
   renderer.setClearColor(0x05060c);
-  scene.add(new THREE.AmbientLight(0x1a1e30,.26));
-  const R=20,H=9,seg=28;
+  scene.add(new THREE.AmbientLight(0x1a1e30,.24));
+  const R=16+((Math.random()*10)|0),H=9,seg=28;
   const floorGeo=new THREE.CylinderGeometry(R,R,.2,seg);
   const floor=new THREE.Mesh(floorGeo,MAT.obs); floor.position.y=-.1; levelGroup.add(floor);
   colliders.push({minx:-R,maxx:R,minz:-R,maxz:R,top:0,bot:-1}); // approx (les murs courbes gèrent le reste)
@@ -1750,17 +1784,22 @@ function buildObservatory(){
     new THREE.MeshBasicMaterial({map:starTex,side:THREE.BackSide}));
   dome.position.y=0; levelGroup.add(dome);
   for(let i=0;i<seg;i+=2){
-    const a=(i/seg)*Math.PI*2;
-    box(.5,H,.5,MAT.obs,Math.cos(a)*(R-.6),H/2,Math.sin(a)*(R-.6),{cast:true});
+    if(Math.random()<.8){ const a=(i/seg)*Math.PI*2;
+      box(.5,H,.5,MAT.obs,Math.cos(a)*(R-.6),H/2,Math.sin(a)*(R-.6),{cast:true}); }
   }
   // télescope central
   const tele=new THREE.Mesh(new THREE.CylinderGeometry(.35,.5,3,10),MAT.metal);
-  tele.rotation.z=.6; tele.position.set(0,1.6,0); tele.castShadow=true; levelGroup.add(tele);
+  tele.rotation.z=rand(.4,.9); tele.rotation.y=rand(0,Math.PI*2);
+  tele.position.set(0,1.6,0); tele.castShadow=true; levelGroup.add(tele);
   colliders.push({minx:-1.2,maxx:1.2,minz:-1.2,maxz:1.2,top:2.6,bot:0});
   pointLight(0,3,0,0x9ab8ff,.4,14);
-  spawnHostile('conductor',[V3(11,0,0),V3(-11,0,0),V3(0,0,11),V3(0,0,-11)]);
+  const angOffset=rand(0,Math.PI*2);
+  spawnHostile('conductor',[0,1,2,3].map(k=>{ const a=Math.PI/2*k+angOffset+Math.PI/8;
+    return V3(Math.cos(a)*(R*.6),0,Math.sin(a)*(R*.6)); }));
+  spawnHostile('static',[0,1].map(k=>{ const a=Math.PI*k+angOffset+.9;
+    return V3(Math.cos(a)*(R*.35),0,Math.sin(a)*(R*.35)); }));
   const spots=[];
-  for(let k=0;k<4;k++){ const a=Math.PI/2*k+.4; spots.push(V3(Math.cos(a)*11,3+Math.sin(k)*1.2,Math.sin(a)*11)); }
+  for(let k=0;k<4;k++){ const a=Math.PI/2*k+angOffset; spots.push(V3(Math.cos(a)*R*.55,3+Math.sin(k)*1.2,Math.sin(a)*R*.55)); }
   spots.forEach((p,i)=>{
     const orb=new THREE.Mesh(new THREE.SphereGeometry(.3,12,10),
       new THREE.MeshBasicMaterial({color:[0xff6a4a,0x4ad8ff,0xffe14a,0xa04aff][i]}));
@@ -2607,8 +2646,9 @@ function animate(){
     mx+=joy.x; mz+=joy.y;
   }
   const run=(keys['ShiftLeft']||keys['ShiftRight']||runHeld);
-  const inWater=waterMesh&&player.pos.y<1.8&&(()=>{return player.pos.x>-30&&player.pos.x<52&&Math.abs(player.pos.z)<13;})();
-  player.inWater=!!inWater&&currentLevel==='pool';
+  player.inWater=!!(waterMesh&&waterBounds&&player.pos.y<1.8&&
+    player.pos.x>waterBounds.minx&&player.pos.x<waterBounds.maxx&&
+    player.pos.z>waterBounds.minz&&player.pos.z<waterBounds.maxz);
   let sp=player.speed*(run?1.7:1)*(player.inWater?.55:1);
   const len=Math.hypot(mx,mz);
   if(len>0){
@@ -2624,6 +2664,11 @@ function animate(){
       footstep(player.inWater?'water':(LEVEL_FLOOR[currentLevel]||'concrete'));
       player.stepT=run?.32:.48;
     }
+  }
+  // relief du sol (escaliers/plateformes) : la hauteur du joueur suit en douceur la cellule sous ses pieds
+  if(terrainSample){
+    const gy=terrainSample(player.pos.x,player.pos.z)+1.65;
+    player.pos.y+=(gy-player.pos.y)*Math.min(1,dt*6);
   }
   camera.position.set(player.pos.x,
     player.pos.y+Math.sin(player.bob)*.035*(len>0?1:0),
