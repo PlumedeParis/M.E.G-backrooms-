@@ -742,7 +742,8 @@ function mats(){
   MAT.ceil=new THREE.MeshStandardMaterial({map:TX.ceil,roughness:.95});
   MAT.conc=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.7,.7),roughness:.95});
   MAT.concD=new THREE.MeshStandardMaterial({map:TX.concDark,normalMap:TX.concDN,normalScale:new THREE.Vector2(.7,.7),roughness:.98});
-  MAT.tile=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.4,.4),roughness:.16,metalness:.05});
+  MAT.tile=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.4,.4),
+    roughness:.62,metalness:.02,color:0x6a7678});
   MAT.metal=new THREE.MeshStandardMaterial({map:TX.metal,normalMap:TX.metalN,normalScale:new THREE.Vector2(.8,.8),roughness:.5,metalness:.7});
   MAT.hub=new THREE.MeshStandardMaterial({map:TX.hub,roughness:.8});
   MAT.brick=new THREE.MeshStandardMaterial({map:TX.brick,normalMap:TX.brickN,normalScale:new THREE.Vector2(1,1),roughness:.95});
@@ -1044,10 +1045,10 @@ function spawnWatcher(ox,oz,N,C){
 
 /* ========== LEVEL 37 — POOLROOMS ========== */
 function buildPool(){
-  scene.fog=new THREE.FogExp2(0x3c4548,.038);
-  renderer.setClearColor(0x3c4548);
-  scene.add(new THREE.AmbientLight(0xd6e0e2,.12));
-  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.09));
+  scene.fog=new THREE.FogExp2(0x2e3638,.045);
+  renderer.setClearColor(0x2e3638);
+  scene.add(new THREE.AmbientLight(0xd6e0e2,.07));
+  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.05));
   const H=5.4;
   // trois halls en enfilade sur X : [-30..-6] [-2..26] [30..54], couloirs entre
   const halls=[{x:-18,z:0,w:24,d:22},{x:12,z:0,w:28,d:26},{x:42,z:0,w:20,d:20}];
@@ -1075,12 +1076,12 @@ function buildPool(){
   // couloirs entre halls
   wallZ(-doorW/2, -6, -2); wallZ(doorW/2, -6, -2);
   wallZ(-doorW/2, 26, 32); wallZ(doorW/2, 26, 32);
-  pointLight(-18,H-1,0,0xdfeaec,.32,13);
-  pointLight(12,H-1,0,0xdfeaec,.36,15);
-  pointLight(42,H-1,0,0xdfeaec,.32,12);
-  // eau
-  const wm=new THREE.MeshPhongMaterial({color:0x9fc4d4,specular:0xffffff,shininess:140,
-    transparent:true,opacity:.86,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
+  pointLight(-18,H-1,0,0xdfeaec,.2,11);
+  pointLight(12,H-1,0,0xdfeaec,.22,12);
+  pointLight(42,H-1,0,0xdfeaec,.2,10);
+  // eau — teinte plus sombre, reflets et spéculaire adoucis pour éviter l'effet miroir éblouissant
+  const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x445c64,shininess:45,
+    transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
   waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(96,34),wm);
   waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(11,.5,0);
   levelGroup.add(waterMesh);
@@ -1088,7 +1089,7 @@ function buildPool(){
   const rt=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
   const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(12,1.4,0); scene.add(cc);
   setTimeout(()=>{waterMesh.visible=false;cc.update(renderer,scene);waterMesh.visible=true;
-    wm.envMap=rt.texture;wm.combine=THREE.MixOperation;wm.reflectivity=.55;wm.needsUpdate=true;},60);
+    wm.envMap=rt.texture;wm.combine=THREE.MixOperation;wm.reflectivity=.18;wm.needsUpdate=true;},60);
   updaters.push(dt=>{TX.waterN.offset.x+=dt*.014;TX.waterN.offset.y+=dt*.011;});
   // passerelles en bois
   const wood=new THREE.MeshStandardMaterial({map:TX.conc,roughness:.9,color:0xc9c2b4});
