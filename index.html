@@ -90,6 +90,16 @@
   #toast{position:absolute;left:50%;top:22%;transform:translateX(-50%);font-size:12px;color:#e8c15a;
     opacity:0;transition:opacity .4s;text-align:center;}
   #credhud{position:absolute;top:14px;left:16px;font-size:11px;color:#e8c15a;}
+  #missionTimer{position:absolute;left:50%;top:14px;transform:translateX(-50%);font-size:14px;color:#e8c15a;display:none;
+    letter-spacing:2px;text-shadow:0 0 6px rgba(0,0,0,.8);}
+  #missionTimer.on{display:block;}
+  #compass{position:absolute;left:50%;top:42px;transform:translateX(-50%);display:none;flex-direction:column;
+    align-items:center;font-size:8px;letter-spacing:2px;color:#e8c15a;}
+  #compass.on{display:flex;}
+  #compassDial{width:42px;height:42px;border-radius:50%;border:1px solid rgba(232,193,90,.55);
+    background:rgba(5,7,5,.5);position:relative;margin-bottom:3px;}
+  #compassNeedle{position:absolute;left:50%;top:50%;width:2px;height:16px;background:#e8c15a;
+    transform-origin:50% 100%;margin-left:-1px;margin-top:-16px;box-shadow:0 0 4px rgba(232,193,90,.8);}
   /* ---------- touch ---------- */
   #touchUI{position:fixed;inset:0;z-index:12;pointer-events:none;display:none;}
   #joyBase{position:absolute;left:26px;bottom:86px;width:110px;height:110px;border-radius:50%;
@@ -146,6 +156,10 @@
   #elevInfo .lvl{font-size:26px;margin-top:10px;color:#fff;}
   /* ---------- ending ---------- */
   #ending{display:none;}
+  #pauseMenu,#settingsMenu{display:none;}
+  #pauseMenu .btn,#settingsMenu .btn{font-size:12px;padding:10px 24px;}
+  .setting-row{display:flex;gap:12px;align-items:center;font-size:11px;color:#9db496;}
+  .setting-row input[type=range]{accent-color:#e8c15a;}
   #polaroid{background:#f2ecd8;padding:14px 14px 52px;transform:rotate(-2deg);box-shadow:0 12px 40px rgba(0,0,0,.8);margin:20px;}
   #photoC{display:block;width:min(78vw,420px);}
   #polaroid .cap{font-family:var(--mono);color:#333;font-size:11px;margin-top:12px;letter-spacing:1px;}
@@ -230,6 +244,8 @@
   <div id="prompt" class="px"></div>
   <div id="anom" class="px">⚠ signal d'anomalie détecté</div>
   <div id="toast" class="px"></div>
+  <div id="missionTimer" class="px"></div>
+  <div id="compass"><div id="compassDial"><div id="compassNeedle"></div></div><div>ASCENSEUR</div></div>
   <div id="stats">
     <div id="hbar"><div id="hfill"></div></div>
     <div class="lbl px">Health</div>
@@ -343,6 +359,23 @@
     <div class="cap">DERNIÈRE PHOTOGRAPHIE — HORODATAGE CORROMPU</div></div>
   <div id="endTxt"></div>
   <button class="btn green" id="againBtn" style="margin-top:18px">Nouveau cycle</button>
+</div>
+
+<div class="screen scan" id="pauseMenu">
+  <h1 class="px" style="font-size:clamp(24px,5vw,40px)">Pause</h1>
+  <button class="btn" id="pauseResume" style="margin-top:24px">▸ Reprendre</button>
+  <button class="btn" id="pauseAbandon" style="margin-top:14px">▸ Abandonner la mission</button>
+  <button class="btn" id="pauseSettings" style="margin-top:14px">▸ Paramètres</button>
+</div>
+
+<div class="screen scan" id="settingsMenu">
+  <h1 class="px" style="font-size:clamp(24px,5vw,40px)">Paramètres</h1>
+  <div style="margin-top:26px;display:flex;flex-direction:column;gap:16px;align-items:center">
+    <div class="setting-row">Volume <input type="range" id="volRange" min="0" max="100" value="70"></div>
+    <button class="btn" id="muteBtn">Couper le son</button>
+    <button class="btn" id="resetSaveBtn" style="color:#e05555;border-color:#e05555">Réinitialiser la progression</button>
+  </div>
+  <button class="btn" id="settingsBack" style="margin-top:26px">▸ Retour</button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -638,6 +671,7 @@ let renderer,scene,camera,clock;
 let levelGroup=null, colliders=[], interactables=[], photoTargets=[], updaters=[];
 let waterMesh=null, dust=null, flashlight=null, flCone=null, waterBounds=null;
 let terrainSample=null; // fonction (x,z)=>hauteur de sol locale, pour les niveaux à relief (escaliers/plateformes)
+let elevatorPos=null, missionTimer=0, missionTimerActive=false, compassOn=false, paused=false;
 let currentLevel='hub';
 const player={yaw:0,pitch:0,pos:V3(0,1.65,0),speed:3.4,inWater:false,bob:0,stepT:0};
 const keys={};
@@ -719,10 +753,10 @@ function setupPostFX(){
 }
 
 function buildFlashlight(){
-  flashlight=new THREE.SpotLight(0xfff2d8,0,34,.46,.5,1.6);
+  flashlight=new THREE.SpotLight(0xfff2d8,0,46,.52,.45,1.4);
   flashlight.castShadow=true;
   flashlight.shadow.mapSize.set(IS_TOUCH?1024:1536,IS_TOUCH?1024:1536);
-  flashlight.shadow.camera.near=.3; flashlight.shadow.camera.far=34;
+  flashlight.shadow.camera.near=.3; flashlight.shadow.camera.far=46;
   flashlight.position.set(.22,-.18,.05);
   camera.add(flashlight);
   const tgt=new THREE.Object3D(); tgt.position.set(0,-.35,-12);
@@ -743,9 +777,14 @@ function buildFlashlight(){
   flCone.position.set(.18,-.22,0); flCone.visible=false;
   camera.add(flCone);
 }
+function toggleCompass(){
+  compassOn=!compassOn;
+  toast(compassOn?'Boussole activée — pointe vers l\'ascenseur':'Boussole désactivée');
+  blip(compassOn?820:400,.1,.08);
+}
 function setFlash(on){
   flashOn=on&&battery>0;
-  flashlight.intensity=flashOn?(1.9+S.lampPower*.7):0;
+  flashlight.intensity=flashOn?(2.9+S.lampPower*1.1):0;
   flCone.visible=flashOn;
   blip(flashOn?900:500,.06,.1,'square');
 }
@@ -825,6 +864,7 @@ function clearLevel(){
     levelGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
   levelGroup=new THREE.Group(); scene.add(levelGroup);
   colliders=[]; interactables=[]; photoTargets=[]; updaters=[]; waterMesh=null; terrainSample=null; waterBounds=null;
+  elevatorPos=null; missionTimerActive=false;
   scene.children.filter(c=>c.isLight&&c!==flashlight).forEach(c=>scene.remove(c));
 }
 function elevatorProp(x,z,ry){
@@ -839,9 +879,30 @@ function elevatorProp(x,z,ry){
   const lamp=new THREE.Mesh(new THREE.PlaneGeometry(1.6,.16),
     new THREE.MeshBasicMaterial({color:0xffcf6a}));
   lamp.position.set(0,3.05,.28); g.add(lamp);
+  // chrono de mission affiché sur le cadre de l'ascenseur
+  const clockCv=document.createElement('canvas'); clockCv.width=128; clockCv.height=48;
+  const clockCtx=clockCv.getContext('2d');
+  const clockTexObj=new THREE.CanvasTexture(clockCv);
+  const clockPlane=new THREE.Mesh(new THREE.PlaneGeometry(1,.38),
+    new THREE.MeshBasicMaterial({map:clockTexObj,transparent:true}));
+  clockPlane.position.set(0,2.6,.27); g.add(clockPlane);
+  let clockAcc=0;
+  updaters.push(dt=>{
+    clockAcc+=dt; if(clockAcc<.5)return; clockAcc=0;
+    clockCtx.clearRect(0,0,128,48);
+    if(missionTimerActive){
+      clockCtx.fillStyle='#0a0a0a'; clockCtx.fillRect(4,4,120,40);
+      const mm=Math.floor(Math.max(0,missionTimer)/60), ss=Math.floor(Math.max(0,missionTimer)%60);
+      clockCtx.fillStyle=missionTimer<60?'#ff5040':'#57e389';
+      clockCtx.font='bold 26px Courier New'; clockCtx.textAlign='center';
+      clockCtx.fillText(mm+':'+(ss<10?'0':'')+ss,64,33);
+    }
+    clockTexObj.needsUpdate=true;
+  });
   levelGroup.add(g);
   const wp=V3(x,1.6,z).add(V3(Math.sin(ry||0),0,Math.cos(ry||0)).multiplyScalar(1));
   colliders.push({minx:x-1.6,maxx:x+1.6,minz:z-.4,maxz:z+.4,top:3.4,bot:0});
+  elevatorPos=V3(x,1,z);
   addInteract(wp,'', ()=>{
     if(currentLevel==='hub'){
       if(!S.selectedMission){toast('Sélectionnez une mission au terminal central');blip(220,.2,.12);return;}
@@ -888,6 +949,7 @@ function loadLevel(id){
   else if(id==='library') buildLibrary();
   else if(id==='observatory') buildObservatory();
   else if(id==='exit') buildExit();
+  if(LEVELS[id]&&id!=='exit'){ missionTimer=600; missionTimerActive=true; }
   camera.position.copy(player.pos);
   updateObjectivesHUD();
 }
@@ -1103,10 +1165,11 @@ function buildLobby(){
   });
   const spots=anom.map(([x,z])=>V3(x,1.6,z));
   const names=anom.map(([,,n])=>n);
-  // le Watcher + le Stalker
+  // le Watcher + le Stalker + le Smiler
   const patrol=dungeon.randomCells(6,2).map(([i,j])=>dungeon.worldOf(i,j));
   spawnWatcher(patrol);
   spawnHostile('stalker',patrol);
+  spawnHostile('smiler',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
   setupRandomMission('lobby',spots,names);
   ambience({hum:118,humVol:.02,humType:'triangle',noise:.004,noiseF:400});
 }
@@ -1124,29 +1187,41 @@ function buildPool(){
   const grid=genDungeon(NX,NZ,{extraOpen:.32,elevChance:0,maxElev:0});
   const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
     pillarChance:.05,lightChance:.18,weirdChance:.2});
-  terrainSample=dungeon.floorAt;
-  // zone inondée : rectangle de cellules contigu (sol plat, pas de relief, pour une eau cohérente)
+  // zone inondée : rectangle de cellules contigu, creusé en piscine enterrée sous le niveau du sol
   const fx0=2+((Math.random()*(NX-9))|0), fz0=1+((Math.random()*(NZ-6))|0);
   const fw=4+((Math.random()*3)|0), fd=3+((Math.random()*3)|0);
   const wminx=ox+fx0*C, wmaxx=ox+(fx0+fw)*C, wminz=oz+fz0*C, wmaxz=oz+(fz0+fd)*C;
   waterBounds={minx:wminx,maxx:wmaxx,minz:wminz,maxz:wmaxz};
   const dcx=(wminx+wmaxx)/2, dcz=(wminz+wmaxz)/2;
+  const poolDepth=1.3;
+  // le sol suit le relief normal partout, sauf dans le bassin où il descend en douceur
+  terrainSample=(x,z)=>{
+    if(waterBounds&&x>waterBounds.minx&&x<waterBounds.maxx&&z>waterBounds.minz&&z<waterBounds.maxz) return -poolDepth;
+    return dungeon.floorAt(x,z);
+  };
+  // fond du bassin + rebords (purement décoratifs, jamais collidants : la descente se fait par le relief, pas par un mur)
+  box(wmaxx-wminx,.2,wmaxz-wminz,MAT.tile,dcx,-poolDepth-.1,dcz,{col:false});
+  box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wminz,{col:false});
+  box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wmaxz,{col:false});
+  box(.25,poolDepth,wmaxz-wminz,MAT.tile,wminx,-poolDepth/2,dcz,{col:false});
+  box(.25,poolDepth,wmaxz-wminz,MAT.tile,wmaxx,-poolDepth/2,dcz,{col:false});
   // eau — teinte sombre, reflets et spéculaire adoucis (évite l'effet miroir éblouissant)
+  const waterY=-poolDepth+.45;
   const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x5a7986,shininess:70,
     transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
   waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(wmaxx-wminx,wmaxz-wminz,1,1),wm);
-  waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,.5,dcz);
+  waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,waterY,dcz);
   levelGroup.add(waterMesh);
   // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement)
   const rt=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
-  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,1.6,dcz); scene.add(cc);
+  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,waterY+1.1,dcz); scene.add(cc);
   function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
     wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
   setTimeout(refreshReflection,60);
   let reflectT=0,waterT=0;
   updaters.push(dt=>{
     TX.waterN.offset.x+=dt*.02; TX.waterN.offset.y+=dt*.015;
-    waterT+=dt; waterMesh.position.y=.5+Math.sin(waterT*.6)*.03;
+    waterT+=dt; waterMesh.position.y=waterY+Math.sin(waterT*.6)*.03;
     wm.normalScale.set(.24+Math.sin(waterT*.4)*.07,.24+Math.cos(waterT*.35)*.07);
     reflectT+=dt; if(reflectT>1.8){ reflectT=0; refreshReflection(); }
   });
@@ -1164,12 +1239,13 @@ function buildPool(){
   const drR=Math.max(2,Math.min(wmaxx-wminx,wmaxz-wminz)/2*.7);
   const dr=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),
     new THREE.MeshBasicMaterial({color:0x18262c,transparent:true,opacity:.5}));
-  dr.scale.set(1,.4,2.2); dr.position.set(dcx,.25,dcz); levelGroup.add(dr);
+  const drY=-poolDepth+.25;
+  dr.scale.set(1,.4,2.2); dr.position.set(dcx,drY,dcz); levelGroup.add(dr);
   let da=0, drCd=0, drLunging=false;
   updaters.push(dt=>{
     if(drCd>0)drCd-=dt;
     if(!drLunging){
-      da+=dt*.25; dr.position.set(dcx+Math.cos(da)*drR,.22,dcz+Math.sin(da)*drR);
+      da+=dt*.25; dr.position.set(dcx+Math.cos(da)*drR,drY-.03,dcz+Math.sin(da)*drR);
       const d=dr.position.distanceTo(player.pos);
       if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
         toast('Entité cataloguée : THE DROWNED');thunk(.35);}
@@ -1178,14 +1254,15 @@ function buildPool(){
       }
     } else {
       const dir=player.pos.clone().sub(dr.position); dir.y=0; dir.normalize();
-      dr.position.addScaledVector(dir,dt*2.4); dr.position.y=.3;
+      dr.position.addScaledVector(dir,dt*2.4); dr.position.y=drY+.08;
       if(dr.position.distanceTo(player.pos)<1.3){
         jumpscare('drowned'); damage(16);
-        drLunging=false; drCd=rand(10,16); dr.position.y=.22;
+        drLunging=false; drCd=rand(10,16); dr.position.y=drY-.03;
       }
     }
   });
   spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   // spawn + ascenseur
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
@@ -1256,6 +1333,7 @@ function buildLights(){
   const spots=dungeon.randomCells(4,5).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,1,p.z); });
   spawnHostile('smiler',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('lights',spots);
@@ -1347,7 +1425,7 @@ function spawnHostile(type,zones){
   const t=tex(256,256,(c,w,h)=>drawEntityFace(type,c,w,h,false));
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false}));
   sp.scale.set(1.55,1.55,1); sp.visible=false; levelGroup.add(sp);
-  let state='idle', cd=rand(5,10), expose=0;
+  let state='idle', cd=rand(2,5), expose=0;
   updaters.push(dt=>{
     if(state==='idle'){ cd-=dt;
       if(cd<=0){ const z=zones[(Math.random()*zones.length)|0];
@@ -1355,7 +1433,7 @@ function spawnHostile(type,zones){
         if(sp.position.distanceTo(player.pos)>cfg.hunt-1){ sp.visible=true; state='hunt';
           blip(rand(55,90),.8,.14,'sawtooth');
           if(!S.entitiesSeen[type]){S.entitiesSeen[type]=true;toast('Entité cataloguée : '+cfg.name);}
-        } else cd=3;
+        } else cd=1.5;
       }
     } else if(state==='hunt'){
       const d=sp.position.distanceTo(player.pos);
@@ -1366,10 +1444,10 @@ function spawnHostile(type,zones){
         const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd);
         const to=sp.position.clone().sub(camera.position).normalize();
         if(fwd.dot(to)>.965&&d<22){ expose+=dt;
-          if(expose>cfg.expose){ state='idle'; sp.visible=false; cd=rand(9,17); expose=0; thunk(.3); }
+          if(expose>cfg.expose){ state='idle'; sp.visible=false; cd=rand(5,9); expose=0; thunk(.3); }
         } else expose=Math.max(0,expose-dt);
       }
-      if(d<1.15){ jumpscare(type); damage(cfg.dmg); state='idle'; sp.visible=false; cd=rand(10,18); expose=0; }
+      if(d<1.15){ jumpscare(type); damage(cfg.dmg); state='idle'; sp.visible=false; cd=rand(6,10); expose=0; }
     }
   });
 }
@@ -1477,6 +1555,8 @@ function buildElec(){
   });
   const spots=gens.map(p=>V3(p.x,1.3,p.z));
   spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('conductor',dungeon.randomCells(3,5).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('elec',spots);
@@ -1538,6 +1618,7 @@ function buildMall(){
   const names=anom.map(([,,n])=>n);
   spawnHostile('mimic',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('faceless',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('mall',spots,names);
@@ -1568,6 +1649,7 @@ function buildHotel(){
   dungeon.randomCells(9,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); pointLight(p.x,H-.5,p.z,0xffcf9a,.4,6); });
   const spots=doors.slice(0,3);
   spawnHostile('faceless',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('mimic',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnLostExplorer(dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-1.4,0);
@@ -1638,6 +1720,7 @@ function buildMetro(){
     updaters.push(dt=>{it.rotation.y+=dt*.6;gl.intensity=.35+Math.sin(clock.elapsedTime*3+i)*.2;});
   });
   spawnHostile('conductor',[V3(0,0,-L/2+20),V3(0,0,L/2-20),...annex.randomCells(2,2).map(([i,j])=>annex.worldOf(i,j))]);
+  spawnHostile('static',[V3(0,0,-8),V3(0,0,8),...annex.randomCells(2,2).map(([i,j])=>annex.worldOf(i,j))]);
   spawnLostExplorer([V3(-platW/2-trackW/2,0,0),V3(platW/2+trackW/2,0,10)]);
   player.pos.set(-platW/2-trackW/2,1.65,-L/2+4); player.yaw=0;
   elevatorProp(-platW-trackW/2+1,-L/2+2,0);
@@ -1681,6 +1764,7 @@ function buildOffices(){
   });
   spawnHostile('stalker',dungeon.randomCells(5,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('mimic',dungeon.randomCells(3,5).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('faceless',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('offices',spots,names);
@@ -1712,6 +1796,7 @@ function buildFrozen(){
   const spots=gens.map(p=>V3(p.x,1,p.z));
   spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('faceless',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   // souffle de vent / craquements
   updaters.push(dt=>{ if(Math.random()<dt*.15) blip(rand(2000,3200),.15,.04); });
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
@@ -1761,6 +1846,7 @@ function buildLibrary(){
   });
   spawnHostile('faceless',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('stalker',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
+  spawnHostile('smiler',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('library',spots);
@@ -1798,6 +1884,8 @@ function buildObservatory(){
     return V3(Math.cos(a)*(R*.6),0,Math.sin(a)*(R*.6)); }));
   spawnHostile('static',[0,1].map(k=>{ const a=Math.PI*k+angOffset+.9;
     return V3(Math.cos(a)*(R*.35),0,Math.sin(a)*(R*.35)); }));
+  spawnHostile('stalker',[0,1,2].map(k=>{ const a=Math.PI*2/3*k+angOffset+.4;
+    return V3(Math.cos(a)*(R*.8),0,Math.sin(a)*(R*.8)); }));
   const spots=[];
   for(let k=0;k<4;k++){ const a=Math.PI/2*k+angOffset; spots.push(V3(Math.cos(a)*R*.55,3+Math.sin(k)*1.2,Math.sin(a)*R*.55)); }
   spots.forEach((p,i)=>{
@@ -1966,6 +2054,7 @@ const HOT=[
   {icon:'📷',name:'Caméra',use:()=>takePhoto()},
   {icon:'✚',name:'Medkit',qty:()=>S.medkits,use:()=>{ if(S.medkits>0&&S.hp<100){S.medkits--;S.hp=clamp(S.hp+50,0,100);toast('Soins appliqués');blip(600,.2,.1);} }},
   {icon:'📻',name:'Radio',use:()=>{ blip(rand(300,900),.4,.06,'square'); toast('« …tchhh… base Thêta, on vous reçoit… tchhh »'); }},
+  {icon:'🧭',name:'Boussole',use:()=>toggleCompass()},
 ];
 function buildHotbar(){
   const hb=$('hotbar'); hb.innerHTML='';
@@ -2039,6 +2128,10 @@ let runHeld=false;
 function bindInput(){
   addEventListener('keydown',e=>{
     if(MP.chatFocused){ if(e.code==='Escape')document.activeElement.blur(); return; }
+    if(e.code==='Escape'&&renderer&&!ended&&$('terminal').style.display!=='flex'&&
+      !$('mpOnline').classList.contains('open')&&!$('mpLobby').classList.contains('open')){
+      togglePause(); return;
+    }
     keys[e.code]=true;
     if(e.code==='KeyE'){
       if($('terminal').style.display==='flex'){closeTerminal();return;}
@@ -2265,6 +2358,51 @@ function triggerEnding(){
 $('againBtn').onclick=()=>{
   ended=false; S.completed={}; S.selectedMission=null; S.hp=100;
   $('ending').style.display='none'; save(); loadLevel('hub'); updateHUD();
+};
+
+/* ---------------- pause / paramètres ---------------- */
+function openPause(){
+  paused=true;
+  $('pauseMenu').style.display='flex';
+  document.exitPointerLock&&document.exitPointerLock();
+  $('pauseAbandon').style.display=(currentLevel==='hub'||currentLevel==='exit')?'none':'';
+}
+function resumeGame(){
+  paused=false;
+  $('pauseMenu').style.display='none';
+  $('settingsMenu').style.display='none';
+  if(!IS_TOUCH)$('game').requestPointerLock&&$('game').requestPointerLock();
+}
+function togglePause(){
+  if($('settingsMenu').style.display==='flex'){ $('settingsMenu').style.display='none'; $('pauseMenu').style.display='flex'; return; }
+  if($('pauseMenu').style.display==='flex') resumeGame(); else openPause();
+}
+$('pauseResume').onclick=resumeGame;
+$('pauseSettings').onclick=()=>{
+  $('pauseMenu').style.display='none'; $('settingsMenu').style.display='flex';
+  $('volRange').value=AU.master?Math.round(AU.master.gain.value*100):70;
+};
+$('settingsBack').onclick=()=>{ $('settingsMenu').style.display='none'; $('pauseMenu').style.display='flex'; };
+$('pauseAbandon').onclick=()=>{
+  $('pauseMenu').style.display='none'; paused=false;
+  S.credits=Math.max(0,S.credits-100);
+  toast('Mission abandonnée · -100 crédits');
+  save();
+  startElevator('hub',true);
+};
+$('volRange').oninput=e=>{ if(AU.master) AU.master.gain.value=e.target.value/100; };
+$('muteBtn').onclick=()=>{
+  if(!AU.master)return;
+  if(AU.master.gain.value>0){ AU.master._prevVol=AU.master.gain.value; AU.master.gain.value=0;
+    $('muteBtn').textContent='Réactiver le son'; }
+  else { AU.master.gain.value=AU.master._prevVol||.7; $('muteBtn').textContent='Couper le son';
+    $('volRange').value=Math.round(AU.master.gain.value*100); }
+};
+$('resetSaveBtn').onclick=()=>{
+  if(!confirm('Réinitialiser toute la progression (niveau, crédits, objets, secteurs validés) ? Cette action est irréversible.'))return;
+  Object.assign(S,{hp:100,lv:1,xp:0,credits:120,batteries:2,medkits:2,lampPower:1,proCam:false,
+    completed:{},entitiesSeen:{},logs:{},selectedMission:null});
+  save(); toast('Progression réinitialisée'); updateHUD();
 };
 
 /* ==================== MULTIJOUEUR — ONLINE PLAY ====================
@@ -2633,7 +2771,8 @@ function collides(x,z){
 }
 function animate(){
   requestAnimationFrame(animate);
-  const dt=Math.min(clock.getDelta(),.05);
+  const rawDt=Math.min(clock.getDelta(),.05);
+  const dt=paused?0:rawDt;
   const t=clock.elapsedTime;
   // mouvement
   const termOpen=$('terminal').style.display==='flex';
@@ -2708,6 +2847,26 @@ function animate(){
   for(const u of updaters)u(dt);
   vhsTick(dt);
   MP.tick(dt);
+  // chrono de mission
+  if(missionTimerActive&&!ended){
+    missionTimer-=dt;
+    if(missionTimer<=0){
+      missionTimer=0; missionTimerActive=false;
+      toast('Temps écoulé — extraction automatique');
+      startElevator('hub',true);
+    }
+    const mm=Math.floor(Math.max(0,missionTimer)/60), ss=Math.floor(Math.max(0,missionTimer)%60);
+    $('missionTimer').textContent='⏱ '+mm+':'+(ss<10?'0':'')+ss;
+    $('missionTimer').classList.add('on');
+  } else $('missionTimer').classList.remove('on');
+  // boussole vers l'ascenseur
+  if(compassOn&&elevatorPos&&!termOpen){
+    const tdx=elevatorPos.x-player.pos.x, tdz=elevatorPos.z-player.pos.z;
+    const targetBearing=Math.atan2(tdx,tdz), playerBearing=Math.atan2(-Math.sin(player.yaw),-Math.cos(player.yaw));
+    const rel=(targetBearing-playerBearing)*180/Math.PI;
+    $('compassNeedle').style.transform=`rotate(${rel}deg)`;
+    $('compass').classList.add('on');
+  } else $('compass').classList.remove('on');
   // grain animé
   if(((t*10)|0)%2===0)$('grain').style.transform=`translate(${(t*97|0)%14}px,${(t*61|0)%14}px)`;
   updateHUD();
