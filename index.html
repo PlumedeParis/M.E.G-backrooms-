@@ -19,6 +19,12 @@
   #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:40;transition:opacity .5s;}
   #hurt{position:fixed;inset:0;pointer-events:none;z-index:39;opacity:0;transition:opacity .6s;
     background:radial-gradient(ellipse at center, transparent 40%, rgba(160,0,0,.55) 100%);}
+  #scream{position:fixed;inset:0;pointer-events:none;z-index:60;opacity:0;background:#000;
+    display:flex;align-items:center;justify-content:center;}
+  #scream img{width:70vh;height:70vh;object-fit:contain;filter:contrast(1.3) brightness(1.1);}
+  #scream.on{opacity:1;animation:shk .18s steps(2) 2;}
+  @keyframes shk{0%{transform:translate(0,0);}25%{transform:translate(-14px,8px);}
+    50%{transform:translate(12px,-10px);}75%{transform:translate(-8px,-6px);}100%{transform:translate(0,0);}}
   /* ---------- HUD ---------- */
   .px{letter-spacing:2px;text-transform:uppercase;font-weight:bold;
     text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;}
@@ -112,6 +118,7 @@
 <body>
 <canvas id="game"></canvas>
 <div id="grain"></div><div id="vignette"></div><div id="hurt"></div><div id="flash"></div>
+<div id="scream"><img id="screamImg" alt=""></div>
 
 <div id="hud">
   <div id="credhud" class="px"></div>
@@ -344,6 +351,27 @@ function buildTextures(){
     speckle(c,w,h,1400,.12);
   },3,2);
   // brique
+  // Hotel Eternity : grille de petites portes infinies sur les murs
+  TX.hotelDoors=tex(512,512,(c,w,h)=>{
+    c.fillStyle='#8a7255'; c.fillRect(0,0,w,h);
+    speckle(c,w,h,1800,.08);
+    const cw=64,ch=48;
+    for(let y=6;y<h;y+=ch)for(let x=6;x<w;x+=cw){
+      c.fillStyle='rgba(40,28,16,.85)'; c.fillRect(x,y,cw-14,ch-12);
+      c.fillStyle='rgba(80,60,36,.9)'; c.fillRect(x+3,y+3,cw-20,ch-18);
+      c.fillStyle='rgba(230,200,140,.5)'; c.fillRect(x+cw-22,y+ch/2-2,3,3); // poignée
+    }
+    grime(c,w,h,20,.08,true);
+  },2,2);
+  // sol en croix (référence photo hotel)
+  TX.hotelFloor=tex(512,512,(c,w,h)=>{
+    c.fillStyle='#c9b98a'; c.fillRect(0,0,w,h);
+    c.fillStyle='#5a8a52';
+    c.fillRect(w*.38,0,w*.24,h); c.fillRect(0,h*.38,w,h*.24);
+    c.strokeStyle='#e9ddc0'; c.lineWidth=6;
+    c.strokeRect(w*.38,0,w*.24,h); c.strokeRect(0,h*.38,w,h*.24);
+    speckle(c,w,h,1200,.06);
+  },3,3);
   TX.brick=tex(512,512,(c,w,h)=>{
     c.fillStyle='#6d4636'; c.fillRect(0,0,w,h);
     const bw=64,bh=28;
@@ -459,13 +487,14 @@ function mats(){
   MAT.black=new THREE.MeshBasicMaterial({color:0x060606});
   MAT.lightPanel=new THREE.MeshBasicMaterial({color:0xfff3cf});
   // teintes dérivées pour les niveaux supplémentaires
-  MAT.mallFloor=new THREE.MeshStandardMaterial({map:TX.tile,roughness:.2,metalness:.05,color:0xe9d9e6});
-  MAT.mallWall=new THREE.MeshStandardMaterial({map:TX.wall,roughness:.85,color:0xf1e6da});
-  MAT.hotelCarpet=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:1,color:0x7a1420});
-  MAT.hotelWall=new THREE.MeshStandardMaterial({map:TX.hub,roughness:.8,color:0xc79a4b});
-  MAT.metro=new THREE.MeshStandardMaterial({map:TX.concD,roughness:.96,color:0x8f97a1});
-  MAT.crimson=new THREE.MeshStandardMaterial({map:TX.wall,roughness:.9,color:0x7a1616});
-  MAT.crimsonFloor=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x3a0d0d});
+  MAT.mallFloor=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x384a3c});
+  MAT.mallWall=new THREE.MeshStandardMaterial({map:TX.conc,roughness:.85,color:0xb8ab94});
+  MAT.hotelCarpet=new THREE.MeshStandardMaterial({map:TX.hotelFloor,roughness:.9});
+  MAT.hotelWall=new THREE.MeshStandardMaterial({map:TX.hotelDoors,roughness:.85});
+  MAT.metro=new THREE.MeshStandardMaterial({map:TX.tile,roughness:.35,metalness:.04,color:0xcbbfa0});
+  MAT.crimson=new THREE.MeshStandardMaterial({map:TX.wall,roughness:.9,color:0x8a5050});
+  MAT.crimsonFloor=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x9a8a6a});
+  MAT.officeCeil=new THREE.MeshStandardMaterial({map:TX.ceil,roughness:.9,color:0xc9baa0});
   MAT.frozen=new THREE.MeshStandardMaterial({map:TX.concD,roughness:.5,metalness:.05,color:0xcfe6f2});
   MAT.frozenFloor=new THREE.MeshStandardMaterial({map:TX.tile,roughness:.1,metalness:.1,color:0xdff2fb});
   MAT.wood=new THREE.MeshStandardMaterial({map:TX.conc,roughness:.85,color:0x6b4a2e});
@@ -493,7 +522,9 @@ function pointLight(x,y,z,color,intensity,dist){
   l.position.set(x,y,z); levelGroup.add(l); return l;
 }
 function addInteract(pos,label,fn,radius){
-  interactables.push({pos:pos.clone(),label,fn,radius:radius||2.6,enabled:true});
+  const it={pos:pos.clone(),label,fn,radius:radius||2.6,enabled:true};
+  interactables.push(it);
+  return it;
 }
 function addPhotoTarget(pos,name){
   photoTargets.push({pos:pos.clone(),name,done:false});
@@ -574,8 +605,8 @@ function loadLevel(id){
 function buildHub(){
   scene.fog=new THREE.FogExp2(0x0a0d12,.03);
   renderer.setClearColor(0x0a0d12);
-  scene.add(new THREE.AmbientLight(0x8899bb,.5));
-  const hemi=new THREE.HemisphereLight(0xcfe0ff,0x1a1c22,.5); scene.add(hemi);
+  scene.add(new THREE.AmbientLight(0x8899bb,.28));
+  const hemi=new THREE.HemisphereLight(0xcfe0ff,0x1a1c22,.3); scene.add(hemi);
   const W=18,D=13,H=3.6;
   box(W,.2,D,MAT.conc,0,-.1,0,{col:false});                    // sol
   box(W,.2,D,MAT.hub,0,H,0,{col:false});                        // plafond
@@ -708,8 +739,9 @@ function buildLobby(){
   }
   const spots=anom.map(([x,z])=>V3(x,1.6,z));
   const names=anom.map(([,,n])=>n);
-  // le Watcher
+  // le Watcher + le Stalker
   spawnWatcher(ox,oz,N,C);
+  spawnHostile('stalker',[V3(ox+C,oz+C),V3(ox+N*C-C,oz+N*C-C),V3(ox+C,oz+N*C-C),V3(ox+N*C-C,oz+C)]);
   setupRandomMission('lobby',spots,names);
   ambience({hum:118,humVol:.02,humType:'triangle',noise:.004,noiseF:400});
 }
@@ -718,22 +750,31 @@ function spawnWatcher(ox,oz,N,C){
   const bm=new THREE.MeshBasicMaterial({color:0x050505,transparent:true});
   const body=new THREE.Mesh(new THREE.CylinderGeometry(.26,.32,1.5,8),bm);
   body.position.y=.85; const head=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),bm.clone());
-  head.position.y=1.75; g.add(body); g.add(head); levelGroup.add(g);
+  head.position.y=1.75; g.add(body); g.add(head);
+  const eyeT=tex(64,64,(c,w,h)=>{
+    const gr=c.createRadialGradient(w/2,h/2,1,w/2,h/2,w*.42);
+    gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.5,'rgba(230,240,255,.7)');
+    gr.addColorStop(1,'rgba(255,255,255,0)');c.fillStyle=gr;c.fillRect(0,0,w,h);});
+  const eye=new THREE.Mesh(new THREE.PlaneGeometry(.13,.07),
+    new THREE.MeshBasicMaterial({map:eyeT,transparent:true,depthWrite:false}));
+  eye.position.set(0,1.77,.19); g.add(eye);
+  levelGroup.add(g);
   let cd=0;
   const place=()=>{
     const i=(Math.random()*N)|0,j=(Math.random()*N)|0;
     g.position.set(ox+i*C+C/2,0,oz+j*C+C/2);
-    g.children.forEach(c=>c.material.opacity=1); g.visible=true;
+    body.material.opacity=1; head.material.opacity=1; eye.material.opacity=1; g.visible=true;
+    blip(rand(180,260),.3,.07); // il vient d'apparaître : léger tintement
   };
   place();
   updaters.push(dt=>{
     cd-=dt;
     const d=g.position.distanceTo(player.pos);
-    if(g.visible&&d<11){
-      g.children.forEach(c=>c.material.opacity-=dt*2);
-      if(g.children[0].material.opacity<=0){g.visible=false;cd=rand(14,26);
+    if(g.visible&&d<13){
+      body.material.opacity-=dt*2.4; head.material.opacity-=dt*2.4; eye.material.opacity-=dt*2.4;
+      if(body.material.opacity<=0){g.visible=false;cd=rand(9,18);
         if(!S.entitiesSeen.watcher){S.entitiesSeen.watcher=true;toast('Entité cataloguée : LE WATCHER');}
-        thunk(.2);}
+        thunk(.22);}
     } else if(!g.visible&&cd<=0){place();}
     if(g.visible)g.lookAt(player.pos.x,g.position.y,player.pos.z);
   });
@@ -743,8 +784,8 @@ function spawnWatcher(ox,oz,N,C){
 function buildPool(){
   scene.fog=new THREE.FogExp2(0xa8b4b8,.03);
   renderer.setClearColor(0xa8b4b8);
-  scene.add(new THREE.AmbientLight(0xd6e0e2,.5));
-  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.4));
+  scene.add(new THREE.AmbientLight(0xd6e0e2,.34));
+  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.26));
   const H=5.4;
   // trois halls en enfilade sur X : [-30..-6] [-2..26] [30..54], couloirs entre
   const halls=[{x:-18,z:0,w:24,d:22},{x:12,z:0,w:28,d:26},{x:42,z:0,w:20,d:20}];
@@ -801,15 +842,30 @@ function buildPool(){
     updaters.push(dt=>{b.rotation.y+=dt*2;b.position.y=p.y+Math.sin(clock.elapsedTime*2+i)*.15;
       gl.intensity=.6+Math.sin(clock.elapsedTime*5+i)*.35;});
   });
-  // The Drowned — silhouette sous l'eau
+  // The Drowned — silhouette sous l'eau, surgit si on s'approche trop
   const dr=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),
     new THREE.MeshBasicMaterial({color:0x18262c,transparent:true,opacity:.5}));
   dr.scale.set(1,.4,2.2); dr.position.set(6,.25,5); levelGroup.add(dr);
-  let da=0;
-  updaters.push(dt=>{da+=dt*.25;dr.position.set(12+Math.cos(da)*9,.22,Math.sin(da)*8);
-    const d=dr.position.distanceTo(player.pos);
-    if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
-      toast('Entité cataloguée : THE DROWNED');thunk(.35);}});
+  let da=0, drCd=0, drLunging=false;
+  updaters.push(dt=>{
+    if(drCd>0)drCd-=dt;
+    if(!drLunging){
+      da+=dt*.25; dr.position.set(12+Math.cos(da)*9,.22,Math.sin(da)*8);
+      const d=dr.position.distanceTo(player.pos);
+      if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
+        toast('Entité cataloguée : THE DROWNED');thunk(.35);}
+      if(player.inWater&&d<3.4&&drCd<=0){
+        drLunging=true; blip(90,.6,.16,'sawtooth');
+      }
+    } else {
+      const dir=player.pos.clone().sub(dr.position); dir.y=0; dir.normalize();
+      dr.position.addScaledVector(dir,dt*2.4); dr.position.y=.3;
+      if(dr.position.distanceTo(player.pos)<1.3){
+        jumpscare('drowned'); damage(16);
+        drLunging=false; drCd=rand(10,16); dr.position.y=.22;
+      }
+    }
+  });
   // spawn + ascenseur
   player.pos.set(-27,1.65,-8); player.yaw=-Math.PI/2.4;
   elevatorProp(-29.4,-8,Math.PI/2);
@@ -855,7 +911,7 @@ function room(x,z,w,d,H,mat,openings){
 function buildLights(){
   scene.fog=new THREE.FogExp2(0x000000,.075);
   renderer.setClearColor(0x000000);
-  scene.add(new THREE.AmbientLight(0x22242e,.32));
+  scene.add(new THREE.AmbientLight(0x22242e,.22));
   const H=3.2, m=MAT.concD;
   room(0,0,12,12,H,m,{n:3,s:3,e:3,w:3});
   corridor(6,0,29.5,0,3,H,m);   room(34,0,9,9,H,m,{w:3});
@@ -888,50 +944,150 @@ function buildLights(){
   ambience({hum:52,humVol:.014,humType:'sine',noise:.003,noiseF:120});
   updaters.push(dt=>{ if(Math.random()<dt*.06){thunk(.12);} });
 }
-function spawnSmiler(zones){
-  const t=tex(256,256,(c,w,h)=>{
-    c.clearRect(0,0,w,h);
-    const eye=(x)=>{const g=c.createRadialGradient(x,95,2,x,95,26);
-      g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(.4,'rgba(220,235,255,.8)');
-      g.addColorStop(1,'rgba(255,255,255,0)');c.fillStyle=g;c.fillRect(x-30,60,60,70);};
-    eye(88);eye(168);
-    c.strokeStyle='rgba(235,245,255,.9)';c.lineWidth=5;c.setLineDash([7,9]);
-    c.beginPath();c.arc(128,120,62,.25*Math.PI,.75*Math.PI);c.stroke();
-  });
+/* ---------------- entités hostiles génériques ---------------- */
+const HOSTILE_CFG={
+  stalker:  {name:'LE STALKER',   speed:1.55, dmg:14, expose:1.0, hunt:9,  jitter:0},
+  mimic:    {name:'LE MIMIC',     speed:1.75, dmg:22, expose:1.5, hunt:9,  jitter:0},
+  smiler:   {name:'LE SMILER',    speed:1.65, dmg:24, expose:1.3, hunt:9,  jitter:0},
+  static:   {name:'STATIC',       speed:1.4,  dmg:12, expose:1.9, hunt:11, jitter:1.4},
+  faceless: {name:'LE FACELESS',  speed:1.7,  dmg:22, expose:1.5, hunt:9,  jitter:0},
+  conductor:{name:'LE CONDUCTOR', speed:2.1,  dmg:34, expose:2.1, hunt:10, jitter:0},
+};
+function drawEntityFace(type,c,w,h,opaque){
+  if(opaque){ c.fillStyle='#050505'; c.fillRect(0,0,w,h); } else c.clearRect(0,0,w,h);
+  const glow=(x,y,r,col)=>{const g=c.createRadialGradient(x,y,1,x,y,r);
+    g.addColorStop(0,col); g.addColorStop(1,'rgba(0,0,0,0)'); c.fillStyle=g; c.fillRect(x-r,y-r,r*2,r*2);};
+  if(type==='smiler'){
+    glow(w*.34,h*.4,w*.16,'rgba(255,255,255,1)'); glow(w*.66,h*.4,w*.16,'rgba(255,255,255,1)');
+    c.strokeStyle='rgba(240,248,255,.95)';c.lineWidth=w*.018;c.setLineDash([w*.025,w*.03]);
+    c.beginPath();c.arc(w/2,h*.52,w*.26,.22*Math.PI,.78*Math.PI);c.stroke();
+    c.setLineDash([]); c.fillStyle='#fff';
+    for(let i=0;i<=9;i++){const a=.22*Math.PI+i*(.56*Math.PI/9);
+      const x=w/2+Math.cos(a)*w*.26,y=h*.52+Math.sin(a)*w*.26;
+      c.save();c.translate(x,y);c.rotate(a+Math.PI/2);c.fillRect(-w*.012,0,w*.024,h*.06);c.restore();}
+    c.strokeStyle='rgba(200,20,20,.55)';c.lineWidth=2;
+    for(let i=0;i<5;i++){const x=w*.4+i*w*.05;c.beginPath();c.moveTo(x,h*.58);
+      c.lineTo(x,h*.58+18+Math.random()*22);c.stroke();}
+  } else if(type==='mimic'){
+    c.fillStyle='rgba(150,150,140,.5)'; c.beginPath(); c.ellipse(w/2,h/2,w*.34,h*.4,0,0,Math.PI*2); c.fill();
+    glow(w*.36,h*.36,w*.1,'rgba(255,255,255,.95)'); glow(w*.64,h*.36,w*.1,'rgba(255,255,255,.95)');
+    c.strokeStyle='rgba(210,20,20,.9)'; c.lineWidth=w*.022; c.beginPath(); c.moveTo(w/2,h*.44);
+    for(let i=0;i<7;i++) c.lineTo(w/2+(i%2?1:-1)*w*.055,h*.44+i*h*.07);
+    c.stroke();
+  } else if(type==='static'){
+    for(let i=0;i<1100;i++){c.fillStyle=`rgba(${Math.random()<.5?'150,255,170':'255,255,255'},${Math.random()*.85})`;
+      c.fillRect(Math.random()*w,Math.random()*h,2,2);}
+    c.fillStyle='#000'; c.fillRect(w*.28,h*.28,w*.16,h*.18); c.fillRect(w*.56,h*.28,w*.16,h*.18);
+  } else if(type==='faceless'){
+    c.fillStyle='#e8c9a0'; c.beginPath(); c.ellipse(w/2,h/2,w*.3,h*.38,0,0,Math.PI*2); c.fill();
+    c.fillStyle='rgba(180,150,120,.3)';
+    c.beginPath(); c.ellipse(w*.4,h*.46,w*.05,h*.03,0,0,Math.PI*2); c.fill();
+    c.beginPath(); c.ellipse(w*.6,h*.46,w*.05,h*.03,0,0,Math.PI*2); c.fill();
+  } else if(type==='conductor'){
+    c.fillStyle='#0c0c0c'; c.beginPath(); c.ellipse(w/2,h/2,w*.26,h*.44,0,0,Math.PI*2); c.fill();
+    glow(w*.5-w*.15,h*.44,w*.035,'rgba(200,225,255,.95)');
+    glow(w*.5+w*.15,h*.44,w*.035,'rgba(200,225,255,.95)');
+    c.fillStyle='rgba(0,0,0,.9)'; c.fillRect(w*.3,h*.14,w*.4,h*.1); // visière de casquette
+  } else if(type==='stalker'){
+    c.fillStyle='rgba(8,12,6,.94)'; c.beginPath(); c.ellipse(w/2,h/2,w*.36,h*.42,0,0,Math.PI*2); c.fill();
+    glow(w*.44,h*.46,w*.025,'rgba(150,210,150,.85)');
+  } else if(type==='drowned'){
+    c.fillStyle='#1c2c2a'; c.beginPath(); c.ellipse(w/2,h/2,w*.32,h*.4,0,0,Math.PI*2); c.fill();
+    c.fillStyle='#000'; c.beginPath(); c.ellipse(w*.38,h*.42,w*.07,h*.09,0,0,Math.PI*2); c.fill();
+    c.beginPath(); c.ellipse(w*.62,h*.42,w*.07,h*.09,0,0,Math.PI*2); c.fill();
+    c.fillStyle='rgba(90,130,120,.5)';
+    c.beginPath(); c.ellipse(w/2,h*.64,w*.14,h*.05,0,0,Math.PI*2); c.fill();
+  }
+}
+function jumpscare(type){
+  const cv=document.createElement('canvas'); cv.width=512; cv.height=512;
+  drawEntityFace(type||'smiler',cv.getContext('2d'),512,512,true);
+  $('screamImg').src=cv.toDataURL();
+  const ov=$('scream'); ov.classList.add('on');
+  auInit();
+  if(AU.ctx){
+    const c=AU.ctx,o=c.createOscillator(),g=c.createGain();
+    o.type='sawtooth'; o.frequency.setValueAtTime(1500,c.currentTime);
+    o.frequency.exponentialRampToValueAtTime(80,c.currentTime+.35);
+    g.gain.setValueAtTime(.5,c.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+.4);
+    o.connect(g);g.connect(AU.master);o.start();o.stop(c.currentTime+.42);
+    const s=c.createBufferSource(); s.buffer=noiseBuf();
+    const gg=c.createGain(); gg.gain.setValueAtTime(.55,c.currentTime);
+    gg.gain.exponentialRampToValueAtTime(.001,c.currentTime+.3);
+    s.connect(gg);gg.connect(AU.master); s.start(); s.stop(c.currentTime+.3);
+  }
+  if(navigator.vibrate) navigator.vibrate([90,40,140]);
+  setTimeout(()=>ov.classList.remove('on'),260);
+}
+function spawnHostile(type,zones){
+  const cfg=HOSTILE_CFG[type];
+  const t=tex(256,256,(c,w,h)=>drawEntityFace(type,c,w,h,false));
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false}));
-  sp.scale.set(1.5,1.5,1); sp.visible=false; levelGroup.add(sp);
-  let state='idle', cd=rand(6,12), expose=0;
+  sp.scale.set(1.55,1.55,1); sp.visible=false; levelGroup.add(sp);
+  let state='idle', cd=rand(5,10), expose=0;
   updaters.push(dt=>{
     if(state==='idle'){ cd-=dt;
       if(cd<=0){ const z=zones[(Math.random()*zones.length)|0];
         sp.position.set(z.x+rand(-2,2),1.6,z.z+rand(-2,2));
-        if(sp.position.distanceTo(player.pos)>8){ sp.visible=true; state='hunt';
-          blip(70,.8,.12,'sawtooth');
-          if(!S.entitiesSeen.smiler){S.entitiesSeen.smiler=true;toast('Entité cataloguée : LE SMILER');}
+        if(sp.position.distanceTo(player.pos)>cfg.hunt-1){ sp.visible=true; state='hunt';
+          blip(rand(55,90),.8,.14,'sawtooth');
+          if(!S.entitiesSeen[type]){S.entitiesSeen[type]=true;toast('Entité cataloguée : '+cfg.name);}
         } else cd=3;
       }
     } else if(state==='hunt'){
       const d=sp.position.distanceTo(player.pos);
       const dir=player.pos.clone().sub(sp.position); dir.y=0; dir.normalize();
-      sp.position.addScaledVector(dir,dt*1.15);
-      // exposé à la lampe ?
+      if(cfg.jitter) sp.position.addScaledVector(V3(rand(-1,1),0,rand(-1,1)),dt*cfg.jitter*.35);
+      sp.position.addScaledVector(dir,dt*cfg.speed);
       if(flashOn){
         const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd);
         const to=sp.position.clone().sub(camera.position).normalize();
         if(fwd.dot(to)>.965&&d<22){ expose+=dt;
-          if(expose>1.3){ state='idle'; sp.visible=false; cd=rand(10,18); expose=0; thunk(.3); }
+          if(expose>cfg.expose){ state='idle'; sp.visible=false; cd=rand(9,17); expose=0; thunk(.3); }
         } else expose=Math.max(0,expose-dt);
       }
-      if(d<1.1){ damage(18); state='idle'; sp.visible=false; cd=rand(12,20); expose=0; }
+      if(d<1.15){ jumpscare(type); damage(cfg.dmg); state='idle'; sp.visible=false; cd=rand(10,18); expose=0; }
     }
   });
 }
+function spawnSmiler(zones){ spawnHostile('smiler',zones); }
+
+/* ---------------- agent égaré (PNJ inoffensif fuyant) ---------------- */
+function spawnLostExplorer(zones){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(.24,.3,1.45,8),
+    new THREE.MeshStandardMaterial({color:0xe8c520,roughness:.75}));
+  body.position.y=.82;
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.19,10,8),
+    new THREE.MeshStandardMaterial({color:0x201a10,roughness:.6}));
+  head.position.y=1.68;
+  const pack=new THREE.Mesh(new THREE.BoxGeometry(.28,.34,.16),
+    new THREE.MeshStandardMaterial({color:0x8a7a2a,roughness:.8}));
+  pack.position.set(0,1,-.22);
+  g.add(body); g.add(head); g.add(pack); levelGroup.add(g); g.visible=false;
+  let placed=false, cd=rand(6,14);
+  const place=()=>{ const z=zones[(Math.random()*zones.length)|0];
+    g.position.set(z.x+rand(-3,3),0,z.z+rand(-3,3)); g.visible=true; placed=true; };
+  updaters.push(dt=>{
+    if(!placed){ cd-=dt; if(cd<=0)place(); return; }
+    const d=g.position.distanceTo(player.pos);
+    if(d<10){
+      const dir=g.position.clone().sub(player.pos); dir.y=0; dir.normalize();
+      g.position.addScaledVector(dir,dt*2.3);
+      const ang=Math.atan2(dir.x,dir.z); g.rotation.y=ang;
+      if(!S.entitiesSeen.lost){S.entitiesSeen.lost=true;toast('Silhouette repérée : agent égaré, en fuite');}
+    }
+    if(d>36){ g.visible=false; placed=false; cd=rand(16,26); }
+  });
+}
+
 
 /* ========== LEVEL 42 — ELECTRICAL STATION ========== */
 function buildElec(){
   scene.fog=new THREE.FogExp2(0x07070a,.05);
   renderer.setClearColor(0x07070a);
-  scene.add(new THREE.AmbientLight(0x2a2c38,.4));
+  scene.add(new THREE.AmbientLight(0x2a2c38,.28));
   const H=5,W=46,D=30;
   box(W,.2,D,MAT.concD,0,-.1,0,{col:false});
   box(W,.2,D,MAT.concD,0,H,0,{col:false});
@@ -978,7 +1134,7 @@ function buildElec(){
     lever.position.set(p.x,1.9,p.z); lever.rotation.z=.7; levelGroup.add(lever);
   });
   const spots=gens.map(p=>V3(p.x,1.3,p.z));
-  spawnSmiler([V3(-10,0,0),V3(10,0,0),V3(0,0,-9)]);
+  spawnHostile('static',[V3(-10,0,0),V3(10,0,0),V3(0,0,-9)]);
   player.pos.set(-2,1.65,-12); player.yaw=Math.PI;
   elevatorProp(-2,-D/2+.45,0);
   setupRandomMission('elec',spots);
@@ -989,8 +1145,8 @@ function buildElec(){
 function buildMall(){
   scene.fog=new THREE.FogExp2(0xa89a86,.03);
   renderer.setClearColor(0xa89a86);
-  scene.add(new THREE.AmbientLight(0xcfc0a8,.45));
-  scene.add(new THREE.HemisphereLight(0xd8cbb0,0x5a4c38,.35));
+  scene.add(new THREE.AmbientLight(0xcfc0a8,.3));
+  scene.add(new THREE.HemisphereLight(0xd8cbb0,0x5a4c38,.24));
   const H=4.6,L=90,W=9;
   box(W,.2,L,MAT.mallFloor,0,-.1,0,{col:false});
   box(W,.2,L,MAT.mallWall,0,H,0,{col:false});
@@ -1019,9 +1175,32 @@ function buildMall(){
       new THREE.MeshStandardMaterial({color:0xd8c9b8,roughness:.6}));
     mk.position.set(x+rand(-1.2,1.2),.95,z); levelGroup.add(mk);
   });
+  // atrium central : escalier monumental + anneau de plafond (référence photo)
+  {
+    const az=0; // centre du couloir
+    const steps=10;
+    for(let s=0;s<steps;s++){
+      box(3.4,.18,.42,MAT.conc,0,.09+s*.18,az+2.4-s*.42,{col:s<3,cast:true});
+    }
+    box(1.7,H-.4,1.7,MAT.conc,-2.6,H/2-.2,az,{cast:true}); // colonnes de l'atrium
+    box(1.7,H-.4,1.7,MAT.conc,2.6,H/2-.2,az,{cast:true});
+    const ringT=tex(512,512,(c,w,h)=>{
+      c.fillStyle='#3a3a3e'; c.fillRect(0,0,w,h);
+      const cx=w/2,cy=h/2;
+      const grad=c.createRadialGradient(cx,cy,w*.22,cx,cy,w*.32);
+      grad.addColorStop(0,'#0a0a0a'); grad.addColorStop(1,'#5a5248');
+      c.fillStyle=grad; c.beginPath(); c.arc(cx,cy,w*.32,0,Math.PI*2); c.fill();
+      c.strokeStyle='rgba(255,238,200,.5)'; c.lineWidth=6;
+      c.beginPath(); c.arc(cx,cy,w*.24,0,Math.PI*2); c.stroke();
+    });
+    const ring=new THREE.Mesh(new THREE.CircleGeometry(2.6,32),
+      new THREE.MeshBasicMaterial({map:ringT}));
+    ring.rotation.x=Math.PI/2; ring.position.set(0,H-.05,az); levelGroup.add(ring);
+    pointLight(0,H-.4,az,0xffe4b0,.6,10);
+  }
   const spots=anom.map(([x,z])=>V3(x,1.5,z));
   const names=anom.map(([,,n])=>n);
-  spawnSmiler([V3(0,0,-L/2+10),V3(0,0,L/2-10),V3(0,0,0)]);
+  spawnHostile('mimic',[V3(0,0,-L/2+10),V3(0,0,L/2-10),V3(0,0,0)]);
   player.pos.set(0,1.65,-L/2+3); player.yaw=0;
   elevatorProp(0,-L/2+1,0);
   setupRandomMission('mall',spots,names);
@@ -1032,7 +1211,7 @@ function buildMall(){
 function buildHotel(){
   scene.fog=new THREE.FogExp2(0x1a0e0e,.045);
   renderer.setClearColor(0x1a0e0e);
-  scene.add(new THREE.AmbientLight(0x3a2018,.45));
+  scene.add(new THREE.AmbientLight(0x3a2018,.3));
   const H=3.6,L=70,W=4.4;
   box(W,.2,L,MAT.hotelCarpet,0,-.1,0,{col:false});
   box(W,.2,L,MAT.hotelWall,0,H,0,{col:false});
@@ -1055,7 +1234,7 @@ function buildHotel(){
   }
   doors.sort(()=>Math.random()-.5);
   const spots=doors.slice(0,3);
-  spawnSmiler([V3(0,0,-L/2+12),V3(0,0,L/2-12)]);
+  spawnHostile('faceless',[V3(0,0,-L/2+12),V3(0,0,L/2-12)]);
   player.pos.set(0,1.65,-L/2+3); player.yaw=0;
   elevatorProp(0,-L/2+1,0);
   setupRandomMission('hotel',spots);
@@ -1067,7 +1246,7 @@ function buildHotel(){
 function buildMetro(){
   scene.fog=new THREE.FogExp2(0x0a0c0e,.038);
   renderer.setClearColor(0x0a0c0e);
-  scene.add(new THREE.AmbientLight(0x3a4048,.4));
+  scene.add(new THREE.AmbientLight(0x3a4048,.26));
   const H=4.8,L=60,platW=7,trackW=4;
   box(platW,.2,L,MAT.metro,-platW/2-trackW/2,-.1,0,{col:false});
   box(platW,.2,L,MAT.metro,platW/2+trackW/2,-.1,0,{col:false});
@@ -1090,6 +1269,22 @@ function buildMetro(){
     if(Math.random()<.5) box(.4,1.1,.4,MAT.metro,-platW-trackW/2+.6,.55,z,{cast:true}); // bancs
   }
   pointLight(0,H-1,0,0xbcd4ff,.35,26);
+  // panneaux publicitaires lumineux (référence photo tunnel piéton)
+  const adT=tex(200,300,(c,w,h)=>{
+    c.fillStyle=['#c9302c','#2c6fc9','#c9a02c','#3aa15a'][(Math.random()*4)|0];
+    c.fillRect(0,0,w,h);
+    c.fillStyle='rgba(255,255,255,.85)';
+    for(let i=0;i<5;i++)c.fillRect(14,20+i*46,w-28,26);
+  });
+  for(let z=-L/2+6;z<L/2-6;z+=10){
+    for(const side of [-1,1]){
+      const px=side*(platW+trackW/2-.19);
+      const ad=new THREE.Mesh(new THREE.PlaneGeometry(1.2,1.9),
+        new THREE.MeshBasicMaterial({map:adT}));
+      ad.position.set(px,1.6,z); ad.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(ad);
+      pointLight(px+side*.3,1.6,z,0xfff2d0,.25,3);
+    }
+  }
   // emplacements d'objectif (effets personnels décoratifs)
   const spots=[V3(-platW-trackW/2+1.4,.6,-L/2+14),V3(platW+trackW/2-1.4,.6,2),V3(-platW-trackW/2+1.6,.6,L/2-12)];
   spots.forEach((p,i)=>{
@@ -1098,7 +1293,8 @@ function buildMetro(){
     const gl=pointLight(p.x,p.y+.3,p.z,0xffd9a0,.5,4);
     updaters.push(dt=>{it.rotation.y+=dt*.6;gl.intensity=.35+Math.sin(clock.elapsedTime*3+i)*.2;});
   });
-  spawnSmiler([V3(0,0,-L/2+20),V3(0,0,L/2-20)]);
+  spawnHostile('conductor',[V3(0,0,-L/2+20),V3(0,0,L/2-20)]);
+  spawnLostExplorer([V3(-platW/2-trackW/2,0,0),V3(platW/2+trackW/2,0,10)]);
   player.pos.set(-platW/2-trackW/2,1.65,-L/2+4); player.yaw=0;
   elevatorProp(-platW-trackW/2+1,-L/2+2,0);
   setupRandomMission('metro',spots);
@@ -1111,16 +1307,25 @@ function buildOffices(){
   const N=7,C=6,H=2.8,ox=-N*C/2,oz=-N*C/2;
   scene.fog=new THREE.FogExp2(0x2a0f0f,.05);
   renderer.setClearColor(0x2a0f0f);
-  scene.add(new THREE.AmbientLight(0x5a2020,.4));
-  scene.add(new THREE.HemisphereLight(0x8a3a3a,0x1a0808,.5));
+  scene.add(new THREE.AmbientLight(0x5a2020,.26));
+  scene.add(new THREE.HemisphereLight(0x8a3a3a,0x1a0808,.32));
   const SZ=N*C;
   box(SZ,.2,SZ,MAT.crimsonFloor,0,-.1,0,{col:false});
-  box(SZ,.2,SZ,MAT.hotelWall,0,H,0,{col:false});
+  box(SZ,.2,SZ,MAT.officeCeil,0,H,0,{col:false});
   const {vw,hw}=mazeGen(N);
   for(let i=0;i<=N;i++)for(let j=0;j<N;j++)if(vw[i][j])
     box(.3,H,C+.3,MAT.crimson,ox+i*C,H/2,oz+j*C+C/2);
   for(let i=0;i<N;i++)for(let j=0;j<=N;j++)if(hw[i][j])
     box(C+.3,H,.3,MAT.crimson,ox+i*C+C/2,H/2,oz+j*C);
+  // porte de sortie balisée (référence photo)
+  {
+    const dT=tex(128,180,(c,w,h)=>{c.fillStyle='#5a4530';c.fillRect(0,0,w,h);
+      c.fillStyle='#c94a3a';c.fillRect(w*.32,10,w*.36,18); // panneau lumineux rouge
+      c.fillStyle='#eee';c.font='11px Courier New';c.textAlign='center';c.fillText('EXIT',w/2,24);});
+    const dm=new THREE.Mesh(new THREE.PlaneGeometry(1,1.4),new THREE.MeshBasicMaterial({map:dT}));
+    dm.position.set(ox+SZ-1.2,.9,oz+SZ-1.2); dm.rotation.y=Math.PI; levelGroup.add(dm);
+    pointLight(ox+SZ-1.2,1.9,oz+SZ-1.2,0xff4030,.4,3);
+  }
   let lit=0;
   for(let i=0;i<N;i++)for(let j=0;j<N;j++){
     if(Math.random()<.4){lightPanel(ox+i*C+C/2,H-.06,oz+j*C+C/2,2,1,Math.random()<.2);
@@ -1137,7 +1342,7 @@ function buildOffices(){
     p.rotation.x=Math.PI/2; p.position.set(x,H-.05,z); levelGroup.add(p);
     spots.push(V3(x,1.4,z));
   });
-  spawnSmiler([V3(ox+C,oz+C),V3(ox+SZ-C,oz+SZ-C),V3(ox+C,oz+SZ-C)]);
+  spawnHostile('stalker',[V3(ox+C,oz+C),V3(ox+SZ-C,oz+SZ-C),V3(ox+C,oz+SZ-C)]);
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('offices',spots,names);
@@ -1148,8 +1353,8 @@ function buildOffices(){
 function buildFrozen(){
   scene.fog=new THREE.FogExp2(0x8fa8b8,.06);
   renderer.setClearColor(0x8fa8b8);
-  scene.add(new THREE.AmbientLight(0xaecde0,.4));
-  scene.add(new THREE.HemisphereLight(0xc0dcec,0x3a4c58,.35));
+  scene.add(new THREE.AmbientLight(0xaecde0,.3));
+  scene.add(new THREE.HemisphereLight(0xc0dcec,0x3a4c58,.24));
   const H=3.3, m=MAT.frozen;
   room(0,0,12,12,H,m,{n:3,s:3,e:3,w:3});
   corridor(6,0,29.5,0,3,H,m);   room(34,0,9,9,H,m,{w:3});
@@ -1159,10 +1364,19 @@ function buildFrozen(){
   // remplacer les sols par la variante givrée (par-dessus, fine couche)
   [[0,0],[34,0],[-34,0],[0,34],[0,-34]].forEach(([x,z])=>box(9,.02,9,MAT.frozenFloor,x,0.01,z,{col:false}));
   pointLight(0,H-.5,0,0xcfe9ff,.5,10);
+  // stalactites de glace (référence photo)
+  const iceMat=new THREE.MeshStandardMaterial({color:0xcfeaf7,roughness:.15,metalness:.05,transparent:true,opacity:.85});
+  const icicle=(x,z)=>{
+    const len=rand(.4,1.1);
+    const ic=new THREE.Mesh(new THREE.ConeGeometry(rand(.06,.14),len,6),iceMat);
+    ic.position.set(x,H-len/2,z); levelGroup.add(ic);
+  };
+  const rooms=[[0,0],[34,0],[-34,0],[0,34],[0,-34]];
+  rooms.forEach(([rx,rz])=>{ for(let k=0;k<6;k++) icicle(rx+rand(-3.5,3.5),rz+rand(-3.5,3.5)); });
   const gens=[V3(34,0,0),V3(-34,0,0),V3(0,0,34)];
   gens.forEach(p=>{ box(1.2,1.4,1.2,MAT.metal,p.x,.7,p.z,{cast:true}); });
   const spots=gens.map(p=>V3(p.x,1,p.z));
-  spawnSmiler([V3(20,0,0),V3(-20,0,0),V3(0,0,-20)]);
+  spawnHostile('static',[V3(20,0,0),V3(-20,0,0),V3(0,0,-20)]);
   // souffle de vent / craquements
   updaters.push(dt=>{ if(Math.random()<dt*.15) blip(rand(2000,3200),.15,.04); });
   player.pos.set(0,1.65,2); player.yaw=Math.PI;
@@ -1175,15 +1389,25 @@ function buildFrozen(){
 function buildLibrary(){
   scene.fog=new THREE.FogExp2(0x1c140c,.03);
   renderer.setClearColor(0x1c140c);
-  scene.add(new THREE.AmbientLight(0x4a3a24,.5));
-  scene.add(new THREE.HemisphereLight(0xd8c090,0x1a1208,.45));
+  scene.add(new THREE.AmbientLight(0x4a3a24,.3));
+  scene.add(new THREE.HemisphereLight(0xd8c090,0x1a1208,.28));
   const W=42,D=42,H=4.4;
-  box(W,.2,D,MAT.wood,0,-.1,0,{col:false});
-  box(W,.2,D,MAT.hotelWall,0,H,0,{col:false});
+  const libCarpet=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x2a3a5a});
+  box(W,.2,D,libCarpet,0,-.1,0,{col:false});
+  box(W,.2,D,MAT.ceil,0,H,0,{col:false});
   box(W,H,.3,MAT.wood,0,H/2,-D/2);
   box(W,H,.3,MAT.wood,0,H/2,D/2);
   box(.3,H,D,MAT.wood,-W/2,H/2,0);
   box(.3,H,D,MAT.wood,W/2,H/2,0);
+  // enseigne ironique (référence photo)
+  {
+    const signT=tex(600,140,(c,w,h)=>{c.fillStyle='#1a1208';c.fillRect(0,0,w,h);
+      c.fillStyle='#e8c15a';c.font='bold 56px Courier New';c.textAlign='center';
+      c.fillText('LA FIN EST PR☉CHE',w/2,88);});
+    const sign=new THREE.Mesh(new THREE.PlaneGeometry(7,1.6),new THREE.MeshBasicMaterial({map:signT}));
+    sign.position.set(0,H-1,-D/2+.2); levelGroup.add(sign);
+    pointLight(0,H-1,-D/2+1,0xffdca0,.4,6);
+  }
   const shelf=(x,z,ry)=>{ const g=new THREE.Group(); g.position.set(x,0,z); g.rotation.y=ry;
     for(let k=0;k<5;k++){const s=new THREE.Mesh(new THREE.BoxGeometry(3,.1,1),MAT.wood);
       s.position.y=.3+k*.6; s.castShadow=true; g.add(s);}
@@ -1202,7 +1426,7 @@ function buildLibrary(){
     const gl=pointLight(p.x,p.y+.3,p.z,0xd8b878,.5,4);
     updaters.push(dt=>{bk.rotation.y+=dt*.8;gl.intensity=.35+Math.sin(clock.elapsedTime*3+i)*.2;});
   });
-  spawnSmiler([V3(-11,0,4),V3(11,0,-4)]);
+  spawnHostile('faceless',[V3(-11,0,4),V3(11,0,-4)]);
   player.pos.set(0,1.65,-18); player.yaw=Math.PI;
   elevatorProp(0,-19.5,Math.PI);
   setupRandomMission('library',spots);
@@ -1214,7 +1438,7 @@ function buildLibrary(){
 function buildObservatory(){
   scene.fog=new THREE.FogExp2(0x05060c,.02);
   renderer.setClearColor(0x05060c);
-  scene.add(new THREE.AmbientLight(0x1a1e30,.4));
+  scene.add(new THREE.AmbientLight(0x1a1e30,.26));
   const R=20,H=9,seg=28;
   const floorGeo=new THREE.CylinderGeometry(R,R,.2,seg);
   const floor=new THREE.Mesh(floorGeo,MAT.obs); floor.position.y=-.1; levelGroup.add(floor);
@@ -1234,6 +1458,7 @@ function buildObservatory(){
   tele.rotation.z=.6; tele.position.set(0,1.6,0); tele.castShadow=true; levelGroup.add(tele);
   colliders.push({minx:-1.2,maxx:1.2,minz:-1.2,maxz:1.2,top:2.6,bot:0});
   pointLight(0,3,0,0x9ab8ff,.4,14);
+  spawnHostile('conductor',[V3(11,0,0),V3(-11,0,0),V3(0,0,11),V3(0,0,-11)]);
   const spots=[];
   for(let k=0;k<4;k++){ const a=Math.PI/2*k+.4; spots.push(V3(Math.cos(a)*11,3+Math.sin(k)*1.2,Math.sin(a)*11)); }
   spots.forEach((p,i)=>{
@@ -1245,6 +1470,21 @@ function buildObservatory(){
   });
   player.pos.set(0,1.65,R-2.5); player.yaw=Math.PI;
   elevatorProp(0,R-1,Math.PI);
+  // salle de contrôle d'observation (référence photo : bureau, écrans, racks serveurs)
+  {
+    const cz=R-4.5;
+    box(2.2,.05,.9,MAT.metal,-2.2,.8,cz,{cast:true}); // bureau
+    for(let k=0;k<3;k++){
+      const scrT=tex(128,96,(c,w,h)=>{c.fillStyle='#04140a';c.fillRect(0,0,w,h);
+        c.fillStyle='#57e389';c.font='10px Courier New';
+        for(let i=0;i<5;i++)c.fillText('>..............',4,14+i*16);});
+      const scr=new THREE.Mesh(new THREE.PlaneGeometry(.5,.36),new THREE.MeshBasicMaterial({map:scrT}));
+      scr.position.set(-2.9+k*.7,1.14,cz-.4); levelGroup.add(scr);
+    }
+    pointLight(-2.2,1.4,cz,0x57e389,.4,4);
+    for(let k=0;k<3;k++)
+      box(.7,2,.5,MAT.metal,3+k*.9,1,cz,{cast:true}); // racks serveurs
+  }
   setupRandomMission('observatory',spots);
   ambience({hum:30,humVol:.014,humType:'sine',noise:.004,noiseF:1400});
 }
@@ -1298,8 +1538,12 @@ function setupRandomMission(id,spots,names){
       const ring=new THREE.Mesh(new THREE.RingGeometry(.42,.57,22),
         new THREE.MeshBasicMaterial({color:0xffd24a,transparent:true,opacity:.5,side:THREE.DoubleSide}));
       ring.rotation.x=-Math.PI/2; ring.position.set(p.x,.03,p.z); levelGroup.add(ring);
-      updaters.push(dt=>{ring.material.opacity=.25+Math.sin(clock.elapsedTime*3)*.2;});
-      addInteract(p,cat.verb,()=>{ring.visible=false;progress(cat.done+(label?' : '+label:''));},cat.id==='observation'?4.5:2.4);
+      updaters.push(dt=>{ if(ring.visible) ring.material.opacity=.25+Math.sin(clock.elapsedTime*3)*.2; });
+      const it=addInteract(p,cat.verb,()=>{
+        if(!it.enabled)return;
+        it.enabled=false; it.radius=0; ring.visible=false; levelGroup.remove(ring);
+        progress(cat.done+(label?' : '+label:''));
+      },cat.id==='observation'?4.5:2.4);
     }
   });
   updateObjectivesHUD();
@@ -1499,10 +1743,15 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   t.classList.add('on'); termTab=t.dataset.t; renderTerm();
 });
 const ENC=[
-  {id:'watcher',n:'LE WATCHER',d:'FAIBLE',p:'Silhouette immobile observée en bout de couloir. Se dissout dès qu\'on l\'approche. Aucun contact physique répertorié. Habitat : Level 0.'},
-  {id:'smiler',n:'LE SMILER',d:'ÉLEVÉ',p:'Deux yeux luminescents et un sourire discontinu, uniquement visibles dans l\'obscurité. Repoussé par une exposition prolongée à la lumière directe. Habitat : zones sans alimentation.'},
-  {id:'drowned',n:'THE DROWNED',d:'MODÉRÉ',p:'Masse sombre circulant sous la surface des Poolrooms. N\'a jamais franchi la ligne de flottaison. Ne pas nager hors des passerelles.'},
-  {id:'mimic',n:'LE MIMIC',d:'INCONNU',p:'Signalements radio non confirmés : voix familières imitant les agents. Protocole : toute transmission sans code du jour est considérée hostile.'},
+  {id:'watcher',n:'LE WATCHER',d:'FAIBLE',p:'Silhouette immobile à l\'œil unique luminescent, observée en bout de couloir. Se dissout dès qu\'on l\'approche. Aucun contact physique répertorié. Habitat : Level 0.'},
+  {id:'stalker',n:'LE STALKER',d:'MODÉRÉ',p:'Ombre humanoïde tapie dans les angles morts, quasiment invisible hors du faisceau de lampe. Charge dès qu\'elle se sait repérée. Habitat : zones à moquette, pièces exiguës.'},
+  {id:'mimic',n:'LE MIMIC',d:'ÉLEVÉ',p:'Créature grise à la peau distendue, fendue d\'une entaille verticale. Imite parfois des voix familières à la radio avant de charger. Habitat : zones commerciales et bureaux.'},
+  {id:'smiler',n:'LE SMILER',d:'ÉLEVÉ',p:'Deux yeux luminescents et un sourire denté discontinu, uniquement visibles dans l\'obscurité. Repoussé par une exposition prolongée à la lumière directe. Habitat : zones sans alimentation.'},
+  {id:'static',n:'STATIC',d:'MODÉRÉ',p:'Silhouette instable, faite d\'interférences visuelles, se déplaçant par à-coups erratiques. Brouille les instruments électroniques à l\'approche. Habitat : zones à forte activité électrique.'},
+  {id:'faceless',n:'LE FACELESS',d:'ÉLEVÉ',p:'Corps humain parfaitement banal au visage totalement lisse, sans trait. Immobile de longues minutes avant de se mouvoir soudainement. Habitat : chambres, salons, pièces meublées.'},
+  {id:'conductor',n:'LE CONDUCTOR',d:'CRITIQUE',p:'Silhouette longiligne coiffée d\'une casquette, aux yeux fendus glacés. Le plus rapide et le plus dangereux des contacts répertoriés. Habitat : réseaux souterrains et voies.'},
+  {id:'drowned',n:'THE DROWNED',d:'MODÉRÉ',p:'Masse sombre circulant sous la surface des Poolrooms. Peut surgir et entraîner un agent sous l\'eau s\'il s\'attarde trop près. Ne pas nager hors des passerelles.'},
+  {id:'lost',n:'AGENT ÉGARÉ',d:'AUCUN',p:'Silhouette en combinaison jaune, visiblement humaine, fuyant systématiquement tout contact. Non hostile. Origine et identité inconnues.'},
 ];
 const LOGS={
   lobby:'RAPPORT 0-A — Les murs du Level 0 se reconfigurent entre deux passages. Les quatre anomalies photographiées ne figurent sur aucun plan précédent. La moquette absorbe le son des pas d\'autre chose que nous.',
