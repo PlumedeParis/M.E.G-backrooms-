@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>M.E.G. — Major Explorer Group</title>
+<meta name="description" content="Exploration horror dans les Backrooms. Cartographiez les niveaux, survivez aux anomalies.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#050604">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="M.E.G.">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
   :root{
     --amber:#e8c15a; --green:#57e389; --red:#e05555; --panel:rgba(8,10,8,.88);
@@ -2152,6 +2162,12 @@ $('startBtn').onclick=async()=>{
   if(!IS_TOUCH)$('game').requestPointerLock&&$('game').requestPointerLock();
   toast('Bienvenue à la base Thêta, agent.');
 };
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
