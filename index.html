@@ -150,6 +150,61 @@
   #photoC{display:block;width:min(78vw,420px);}
   #polaroid .cap{font-family:var(--mono);color:#333;font-size:11px;margin-top:12px;letter-spacing:1px;}
   #endTxt{max-width:480px;font-size:12px;line-height:2;color:#9db496;}
+  /* ---------- multijoueur ---------- */
+  #mpOnline,#mpLobby{position:fixed;inset:0;z-index:52;background:#050604;color:#cfe3c8;display:none;
+    flex-direction:column;padding:26px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  #mpOnline.open,#mpLobby.open{display:flex;}
+  .mp-head{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1d3a1d;
+    padding-bottom:14px;margin-bottom:16px;}
+  .mp-head h2{color:#e8c15a;font-size:16px;letter-spacing:3px;}
+  .mp-pseudo{display:flex;gap:8px;align-items:center;font-size:11px;margin-bottom:18px;flex-wrap:wrap;}
+  .mp-pseudo input{background:rgba(10,20,10,.5);border:1px solid #1d3a1d;color:#cfe3c8;font-family:var(--mono);
+    padding:8px 10px;font-size:12px;letter-spacing:1px;}
+  .mp-sub{color:#d7e8b0;font-size:11px;letter-spacing:2px;margin-bottom:10px;}
+  .mp-list{display:flex;flex-direction:column;gap:8px;}
+  .mp-row{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    border:1px solid #1d3a1d;padding:10px 14px;background:rgba(10,20,10,.35);}
+  .mp-row .who{font-size:12px;} .mp-row .who .lv{color:#6f8f6f;font-size:10px;margin-left:6px;}
+  .mp-row .status{font-size:9px;letter-spacing:2px;padding:3px 8px;border:1px solid;white-space:nowrap;}
+  .mp-row .status.ready{color:#57e389;border-color:#57e389;}
+  .mp-row .status.notready{color:#e8c15a;border-color:#e8c15a;}
+  .mp-empty{opacity:.5;font-size:11px;padding:20px 0;text-align:center;}
+  .mp-btn-sm{font-family:var(--mono);font-size:10px;letter-spacing:2px;padding:7px 14px;background:transparent;
+    color:#e8c15a;border:1px solid #e8c15a;cursor:pointer;text-transform:uppercase;white-space:nowrap;}
+  .mp-btn-sm:hover{background:rgba(232,193,90,.12);}
+  .mp-btn-sm:disabled{opacity:.35;cursor:default;}
+  .mp-btn-sm.green{color:#57e389;border-color:#57e389;}
+  .mp-btn-sm.red{color:#e05555;border-color:#e05555;}
+  #mpInviteToast{position:fixed;top:16px;right:16px;z-index:65;background:#0a0f0a;border:1px solid #e8c15a;
+    padding:14px 16px;max-width:280px;font-size:11px;color:#cfe3c8;display:none;box-shadow:0 8px 30px rgba(0,0,0,.7);}
+  #mpInviteToast .t{color:#e8c15a;letter-spacing:1px;margin-bottom:10px;}
+  #mpInviteToast .row{display:flex;gap:8px;}
+  .mp-lobby-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:22px;flex:1;min-height:0;}
+  @media(max-width:760px){.mp-lobby-grid{grid-template-columns:1fr;}}
+  .mp-panel{border:1px solid #1d3a1d;padding:14px;display:flex;flex-direction:column;min-height:0;}
+  .mp-panel h3{color:#d7e8b0;font-size:11px;letter-spacing:2px;margin-bottom:10px;}
+  .mp-levels{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+  .mp-lvl-opt{font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:6px 10px;background:transparent;
+    color:#8ba07f;border:1px solid #2c4a2c;cursor:pointer;}
+  .mp-lvl-opt.sel{color:#e8c15a;border-color:#e8c15a;}
+  .mp-lvl-opt:disabled{opacity:.4;cursor:default;}
+  .mp-chat{flex:1;min-height:220px;}
+  .mp-chat-log{flex:1;overflow-y:auto;font-size:11px;line-height:1.7;margin-bottom:8px;max-height:260px;}
+  .mp-chat-log .m b{color:#57e389;}
+  .mp-chat-form{display:flex;gap:6px;}
+  .mp-chat-form input{flex:1;background:rgba(10,20,10,.5);border:1px solid #1d3a1d;color:#cfe3c8;
+    font-family:var(--mono);padding:8px 10px;font-size:11px;}
+  #mpLoading{position:fixed;inset:0;z-index:64;background:#000;display:none;align-items:center;justify-content:center;
+    flex-direction:column;color:#e8c15a;}
+  #mpLoading.on{display:flex;}
+  #mpLoading .spin{width:38px;height:38px;border:2px solid #2c4a2c;border-top-color:#e8c15a;border-radius:50%;
+    animation:mpspin .8s linear infinite;margin-bottom:16px;}
+  @keyframes mpspin{to{transform:rotate(360deg)}}
+  #mpLoading p{font-size:11px;letter-spacing:3px;}
+  #mpIngameChat{position:fixed;left:16px;top:16px;z-index:20;width:min(300px,70vw);display:none;pointer-events:auto;}
+  #mpIngameChat.on{display:block;}
+  #mpIngameChat .mp-chat-log{background:rgba(5,7,5,.55);padding:8px;max-height:160px;}
+  #mpIngameChat .mp-chat-form input{background:rgba(5,7,5,.7);}
 </style>
 </head>
 <body>
@@ -193,6 +248,7 @@
   <div class="tbtn" id="btnE">E</div>
   <div class="tbtn" id="btnVHS">📹</div>
   <div class="tbtn" id="btnRun">RUN</div>
+  <div class="tbtn" id="btnChat" style="right:90px;bottom:170px;font-size:16px">💬</div>
 </div>
 
 <div class="screen scan" id="title">
@@ -203,7 +259,66 @@
   Explorez les niveaux, documentez les anomalies, cataloguez les entités.<br>
   Et surtout : revenez.</p>
   <button class="btn" id="startBtn">▸ Prendre son service</button>
-  <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir<br>Mobile : joystick + glisser pour regarder</p>
+  <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
+  <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
+</div>
+
+<div id="mpOnline">
+  <div class="mp-head">
+    <h2 class="px">Online Play</h2>
+    <button class="mp-btn-sm" id="mpOnlineClose">Retour</button>
+  </div>
+  <div class="mp-pseudo">
+    <span>Pseudo agent :</span>
+    <input id="mpPseudoInput" maxlength="16" placeholder="Agent-0000">
+    <button class="mp-btn-sm" id="mpPseudoSave">Valider</button>
+  </div>
+  <div class="mp-sub">Joueurs en ligne</div>
+  <div class="mp-list" id="mpPlayerList"><div class="mp-empty">Connexion…</div></div>
+</div>
+
+<div id="mpInviteToast">
+  <div class="t" id="mpInviteText"></div>
+  <div class="row">
+    <button class="mp-btn-sm green" id="mpInviteAccept">Accepter</button>
+    <button class="mp-btn-sm red" id="mpInviteDecline">Refuser</button>
+  </div>
+</div>
+
+<div id="mpLobby">
+  <div class="mp-head">
+    <h2 class="px">Salon d'équipe</h2>
+    <button class="mp-btn-sm" id="mpLobbyLeave">Quitter</button>
+  </div>
+  <div class="mp-lobby-grid">
+    <div class="mp-panel">
+      <h3>Équipe (<span id="mpMemberCount">1</span>/4) · <span id="mpSlotsLeft">3</span> place(s) restante(s)</h3>
+      <div class="mp-list" id="mpMemberList"></div>
+      <h3 style="margin-top:16px">Niveau / Mission</h3>
+      <div class="mp-levels" id="mpLevelPicker"></div>
+      <div style="margin-top:auto;display:flex;gap:10px;align-items:center;padding-top:10px">
+        <button class="mp-btn-sm" id="mpReadyBtn">Prêt</button>
+        <button class="btn green" id="mpStartBtn" style="display:none;padding:8px 20px;font-size:11px">▸ Start Game</button>
+      </div>
+    </div>
+    <div class="mp-panel mp-chat">
+      <h3>Chat d'équipe</h3>
+      <div class="mp-chat-log" id="mpLobbyChatLog"></div>
+      <form class="mp-chat-form" id="mpLobbyChatForm">
+        <input id="mpLobbyChatInput" maxlength="180" autocomplete="off" placeholder="Message…">
+        <button class="mp-btn-sm" type="submit">Envoyer</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="mpLoading"><div class="spin"></div><p id="mpLoadingText">SYNCHRONISATION DE L'ÉQUIPE…</p></div>
+
+<div id="mpIngameChat">
+  <div class="mp-chat-log" id="mpIngameChatLog"></div>
+  <form class="mp-chat-form" id="mpIngameChatForm">
+    <input id="mpIngameChatInput" maxlength="180" autocomplete="off" placeholder="Message… [Entrée]">
+  </form>
 </div>
 
 <div id="terminal" class="scan">
@@ -237,6 +352,8 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="mp-config.js"></script>
 <script>
 "use strict";
 /* =====================================================================
@@ -1844,6 +1961,7 @@ function vhsTick(dt){
 let runHeld=false;
 function bindInput(){
   addEventListener('keydown',e=>{
+    if(MP.chatFocused){ if(e.code==='Escape')document.activeElement.blur(); return; }
     keys[e.code]=true;
     if(e.code==='KeyE'){
       if($('terminal').style.display==='flex'){closeTerminal();return;}
@@ -1852,9 +1970,10 @@ function bindInput(){
     if(e.code==='KeyF'){setFlash(!flashOn);updateHUD();}
     if(e.code==='KeyC')takePhoto();
     if(e.code==='KeyV')toggleVHS();
+    if(e.code==='KeyT'&&MP.inGame)MP.toggleIngameChat();
     if(e.code.startsWith('Digit')){const i=+e.code[5]-1;if(HOT[i]){HOT[i].use();updateHUD();}}
   });
-  addEventListener('keyup',e=>keys[e.code]=false);
+  addEventListener('keyup',e=>{ if(!MP.chatFocused) keys[e.code]=false; });
   const cv=$('game');
   cv.addEventListener('click',()=>{ if(!IS_TOUCH&&document.pointerLockElement!==cv) cv.requestPointerLock(); });
   addEventListener('mousemove',e=>{
@@ -2071,6 +2190,357 @@ $('againBtn').onclick=()=>{
   $('ending').style.display='none'; save(); loadLevel('hub'); updateHUD();
 };
 
+/* ==================== MULTIJOUEUR — ONLINE PLAY ====================
+   Présence, invitations, salon d'équipe et synchronisation de position
+   via Supabase Realtime (voir MULTIPLAYER_SETUP.md pour la config). */
+const MP=(()=>{
+  const cfg=window.MP_CONFIG||{};
+  const configured=!!(cfg.url&&cfg.anonKey&&!/YOUR-PROJECT/.test(cfg.url)&&!/YOUR-ANON-KEY/.test(cfg.anonKey));
+  const MISSION_IDS=['lobby','pool','lights','elec','mall','hotel','metro','offices','frozen','library','observatory'];
+  let sb=null,uid=null,pseudo=null;
+  let presenceCh=null,inboxCh=null,roomCh=null,roomDbCh=null;
+  let room=null,members=[];
+  let onlinePlayers=new Map();
+  let pendingInvite=null;
+  const peers=new Map();
+  let posThrottle=0,chatFocused=false,ingameChatOn=false;
+
+  const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function uuid4(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8); return v.toString(16); }); }
+
+  function loadPseudo(){
+    pseudo=localStorage.getItem('meg-pseudo');
+    if(!pseudo){ pseudo='Agent-'+Math.floor(1000+Math.random()*9000); localStorage.setItem('meg-pseudo',pseudo); }
+    return pseudo;
+  }
+  function savePseudo(p){
+    p=(p||'').trim().slice(0,16); if(!p)return;
+    pseudo=p; localStorage.setItem('meg-pseudo',p);
+    trackPresence();
+    if(room) sb.from('mp_room_members').update({pseudo}).eq('room_id',room.id).eq('user_id',uid).then(()=>{});
+  }
+  async function ensureAuth(){
+    if(uid) return uid;
+    const {data:{session}}=await sb.auth.getSession();
+    if(session){ uid=session.user.id; return uid; }
+    const {data,error}=await sb.auth.signInAnonymously();
+    if(error){ toast('Connexion multijoueur impossible.'); throw error; }
+    uid=data.user.id; return uid;
+  }
+
+  function init(){
+    if(!configured||!window.supabase) return;
+    sb=window.supabase.createClient(cfg.url,cfg.anonKey);
+    loadPseudo();
+  }
+
+  async function open(){
+    if(!configured){ toast('Multijoueur non configuré — voir MULTIPLAYER_SETUP.md'); return; }
+    if(!sb){ toast('Module multijoueur indisponible (réseau) — réessayez plus tard'); return; }
+    await load();
+    $('title').style.display='none';
+    $('mpOnline').classList.add('open');
+    $('mpPseudoInput').value=pseudo;
+    try{ await ensureAuth(); await subscribePresenceAndInbox(); }catch(e){ console.error(e); }
+  }
+  function closeOnline(){ $('mpOnline').classList.remove('open'); $('title').style.display='flex'; }
+
+  async function subscribePresenceAndInbox(){
+    if(presenceCh) return;
+    presenceCh=sb.channel('mp-lobby-presence',{config:{presence:{key:uid}}});
+    presenceCh.on('presence',{event:'sync'},()=>{
+      const state=presenceCh.presenceState();
+      onlinePlayers=new Map();
+      Object.keys(state).forEach(k=>{
+        const p=state[k][0];
+        if(p&&p.user_id!==uid) onlinePlayers.set(p.user_id,p);
+      });
+      renderPlayerList();
+    });
+    await presenceCh.subscribe(status=>{ if(status==='SUBSCRIBED') trackPresence(); });
+    inboxCh=sb.channel('mp-inbox-'+uid,{config:{broadcast:{self:false}}});
+    inboxCh.on('broadcast',{event:'invite'},({payload})=>onInvite(payload));
+    inboxCh.on('broadcast',{event:'invite_declined'},({payload})=>toast(payload.from_pseudo+' a refusé l\'invitation.'));
+    await inboxCh.subscribe();
+  }
+  function trackPresence(){ if(presenceCh) presenceCh.track({user_id:uid,pseudo,level:S.lv,ts:Date.now()}); }
+
+  function renderPlayerList(){
+    const el=$('mpPlayerList'); if(!el)return;
+    if(onlinePlayers.size===0){ el.innerHTML='<div class="mp-empty">Aucun autre agent en ligne pour l\'instant.</div>'; return; }
+    el.innerHTML='';
+    onlinePlayers.forEach((p,pid)=>{
+      const row=document.createElement('div'); row.className='mp-row';
+      row.innerHTML=`<span class="who">${esc(p.pseudo)}<span class="lv">NIV. ${p.level||1}</span></span>`;
+      const btn=document.createElement('button'); btn.className='mp-btn-sm';
+      const already=room&&members.some(m=>m.user_id===pid);
+      const full=room&&members.length>=4;
+      const notLeader=room&&room.leader_id!==uid;
+      btn.textContent=already?'Déjà en équipe':'Inviter';
+      btn.disabled=already||full||notLeader;
+      if(notLeader&&!already) btn.title='Seul le chef d\'équipe peut inviter';
+      btn.onclick=()=>invite(pid,p.pseudo);
+      row.appendChild(btn); el.appendChild(row);
+    });
+  }
+
+  async function ensureOwnRoom(){
+    if(room&&room.leader_id===uid) return room;
+    const id=uuid4();
+    const {data,error}=await sb.from('mp_rooms').insert(
+      {id,leader_id:uid,leader_pseudo:pseudo,level_id:'lobby',status:'lobby'}).select().single();
+    if(error){ toast('Impossible de créer le salon.'); throw error; }
+    await sb.from('mp_room_members').insert({room_id:id,user_id:uid,pseudo,level:S.lv,ready:false});
+    await enterRoom(data.id);
+    return room;
+  }
+  async function invite(targetUid,targetPseudo){
+    if(room&&room.leader_id!==uid) return; // seul le chef d'équipe peut inviter
+    try{
+      await ensureOwnRoom();
+      const ch=sb.channel('mp-inbox-'+targetUid,{config:{broadcast:{self:false}}});
+      await ch.subscribe(status=>{
+        if(status==='SUBSCRIBED'){
+          ch.send({type:'broadcast',event:'invite',payload:{room_id:room.id,from_id:uid,from_pseudo:pseudo}});
+          setTimeout(()=>ch.unsubscribe(),1500);
+        }
+      });
+      toast('Invitation envoyée à '+targetPseudo);
+    }catch(e){}
+  }
+  function onInvite(payload){
+    if(room) return; // déjà en équipe : ignore silencieusement
+    pendingInvite=payload;
+    $('mpInviteText').textContent=payload.from_pseudo+' vous invite à rejoindre son équipe.';
+    $('mpInviteToast').style.display='block';
+    blip(760,.2,.12);
+  }
+  async function acceptInvite(){
+    if(!pendingInvite)return;
+    const inv=pendingInvite; pendingInvite=null; $('mpInviteToast').style.display='none';
+    try{
+      await ensureAuth();
+      const {error}=await sb.from('mp_room_members').insert({room_id:inv.room_id,user_id:uid,pseudo,level:S.lv,ready:false});
+      if(error){ toast('Salon complet ou introuvable.'); return; }
+      await enterRoom(inv.room_id);
+    }catch(e){}
+  }
+  function declineInvite(){
+    if(!pendingInvite)return;
+    const inv=pendingInvite; pendingInvite=null; $('mpInviteToast').style.display='none';
+    const ch=sb.channel('mp-inbox-'+inv.from_id,{config:{broadcast:{self:false}}});
+    ch.subscribe(status=>{ if(status==='SUBSCRIBED'){
+      ch.send({type:'broadcast',event:'invite_declined',payload:{from_pseudo:pseudo}});
+      setTimeout(()=>ch.unsubscribe(),1500);
+    }});
+  }
+
+  async function enterRoom(roomId){
+    const {data:r}=await sb.from('mp_rooms').select('*').eq('id',roomId).single();
+    if(!r) return;
+    room=r;
+    subscribeRoomDb(roomId);
+    joinRoomChannel(roomId);
+    await refreshMembers();
+    $('mpOnline').classList.remove('open');
+    $('mpLobby').classList.add('open');
+    renderLobby();
+  }
+  function subscribeRoomDb(roomId){
+    if(roomDbCh){ sb.removeChannel(roomDbCh); roomDbCh=null; }
+    roomDbCh=sb.channel('mp-room-db-'+roomId)
+      .on('postgres_changes',{event:'*',schema:'public',table:'mp_room_members',filter:'room_id=eq.'+roomId},
+        ()=>refreshMembers())
+      .on('postgres_changes',{event:'*',schema:'public',table:'mp_rooms',filter:'id=eq.'+roomId},payload=>{
+        if(payload.eventType==='DELETE'){ leaveLobbyUI(); return; }
+        room=payload.new; renderLobby();
+        if(room.status==='starting') beginLoadingSequence();
+      }).subscribe();
+  }
+  async function refreshMembers(){
+    if(!room)return;
+    const {data}=await sb.from('mp_room_members').select('*').eq('room_id',room.id).order('joined_at');
+    members=data||[];
+    if(!members.some(m=>m.user_id===uid)){ leaveLobbyUI(); return; }
+    renderLobby();
+  }
+  function joinRoomChannel(roomId){
+    if(roomCh) sb.removeChannel(roomCh);
+    roomCh=sb.channel('mp-room-'+roomId,{config:{broadcast:{self:false}}});
+    roomCh.on('broadcast',{event:'chat'},({payload})=>addChatLine(payload));
+    roomCh.on('broadcast',{event:'pos'},({payload})=>onPeerPos(payload));
+    roomCh.subscribe();
+  }
+
+  function renderLobby(){
+    if(!room)return;
+    $('mpMemberCount').textContent=members.length;
+    $('mpSlotsLeft').textContent=Math.max(0,4-members.length);
+    const list=$('mpMemberList'); list.innerHTML='';
+    members.forEach(m=>{
+      const row=document.createElement('div'); row.className='mp-row';
+      const leaderTag=m.user_id===room.leader_id?' ★':'';
+      row.innerHTML=`<span class="who">${esc(m.pseudo)}${leaderTag}<span class="lv">NIV. ${m.level}</span></span>
+        <span class="status ${m.ready?'ready':'notready'}">${m.ready?'PRÊT':'PAS PRÊT'}</span>`;
+      list.appendChild(row);
+    });
+    const picker=$('mpLevelPicker'); picker.innerHTML='';
+    const isLeader=room.leader_id===uid;
+    MISSION_IDS.forEach(id=>{
+      const b=document.createElement('button');
+      b.className='mp-lvl-opt'+(room.level_id===id?' sel':'');
+      b.textContent=LEVELS[id].name.replace(/^LEVEL \d+ — /,'');
+      b.disabled=!isLeader;
+      b.onclick=()=>{ if(isLeader) sb.from('mp_rooms').update({level_id:id}).eq('id',room.id).then(()=>{}); };
+      picker.appendChild(b);
+    });
+    const me=members.find(m=>m.user_id===uid);
+    $('mpReadyBtn').textContent=me&&me.ready?'✓ Prêt':'Prêt';
+    $('mpReadyBtn').className='mp-btn-sm'+(me&&me.ready?' green':'');
+    const allReady=members.length>0&&members.every(m=>m.ready);
+    $('mpStartBtn').style.display=isLeader?'inline-block':'none';
+    $('mpStartBtn').disabled=!(allReady&&room.level_id);
+  }
+  function toggleReady(){
+    const me=members.find(m=>m.user_id===uid); if(!me||!room)return;
+    sb.from('mp_room_members').update({ready:!me.ready}).eq('room_id',room.id).eq('user_id',uid).then(()=>{});
+  }
+  async function startGame(){
+    if(!room||room.leader_id!==uid)return;
+    await sb.from('mp_rooms').update({status:'starting'}).eq('id',room.id);
+  }
+  function beginLoadingSequence(){
+    $('mpLoading').classList.add('on');
+    setTimeout(async()=>{
+      $('mpLoading').classList.remove('on');
+      $('mpLobby').classList.remove('open');
+      await launchIntoLevel(room?room.level_id||'lobby':'lobby');
+      if(room&&room.leader_id===uid) sb.from('mp_rooms').update({status:'in_game'}).eq('id',room.id);
+    },2400);
+  }
+  async function launchIntoLevel(levelId){
+    if(!renderer){ auInit(); await load(); init(); }
+    if(!IS_TOUCH) $('game').requestPointerLock&&$('game').requestPointerLock();
+    loadLevel(levelId);
+    setupMission(levelId);
+    updateHUD();
+    ingameChatOn=false;
+    $('mpIngameChat').classList.remove('on');
+  }
+
+  function leaveLobbyUI(){
+    room=null; members=[];
+    peers.forEach(p=>{ if(scene) scene.remove(p.group); }); peers.clear();
+    if(roomCh){ sb.removeChannel(roomCh); roomCh=null; }
+    if(roomDbCh){ sb.removeChannel(roomDbCh); roomDbCh=null; }
+    $('mpLobby').classList.remove('open');
+    $('mpOnline').classList.add('open');
+  }
+  async function leaveRoom(){
+    if(!room)return;
+    if(room.leader_id===uid) await sb.from('mp_rooms').delete().eq('id',room.id);
+    else await sb.from('mp_room_members').delete().eq('room_id',room.id).eq('user_id',uid);
+    leaveLobbyUI();
+  }
+
+  function addChatLine(payload){
+    const line=`<div class="m"><b>${esc(payload.pseudo)}:</b> ${esc(payload.text)}</div>`;
+    ['mpLobbyChatLog','mpIngameChatLog'].forEach(id=>{
+      const el=$(id); if(!el)return;
+      el.insertAdjacentHTML('beforeend',line);
+      el.scrollTop=el.scrollHeight;
+    });
+  }
+  function sendChat(text){
+    text=(text||'').trim().slice(0,180); if(!text||!roomCh)return;
+    const payload={pseudo,text,ts:Date.now()};
+    roomCh.send({type:'broadcast',event:'chat',payload});
+    addChatLine(payload);
+  }
+
+  /* ---- synchronisation en jeu : positions des coéquipiers ---- */
+  function shortestAngle(from,to){ let d=(to-from)%(Math.PI*2); if(d>Math.PI)d-=Math.PI*2; if(d<-Math.PI)d+=Math.PI*2; return d; }
+  function tick(dt){
+    if(!room||!roomCh) return;
+    posThrottle+=dt;
+    if(currentLevel!=='hub'&&player&&posThrottle>0.09){
+      posThrottle=0;
+      roomCh.send({type:'broadcast',event:'pos',
+        payload:{uid,pseudo,x:player.pos.x,y:player.pos.y,z:player.pos.z,yaw:player.yaw}});
+    }
+    peers.forEach(p=>{
+      if(!p.target)return;
+      p.group.position.lerp(p.target,Math.min(1,dt*10));
+      p.group.rotation.y+=shortestAngle(p.group.rotation.y,p.targetYaw)*Math.min(1,dt*8);
+    });
+  }
+  function onPeerPos(payload){
+    if(payload.uid===uid)return;
+    let p=peers.get(payload.uid);
+    if(!p){ p=buildPeerAvatar(payload.pseudo); peers.set(payload.uid,p); }
+    p.target=new THREE.Vector3(payload.x,payload.y-1.65,payload.z);
+    p.targetYaw=payload.yaw;
+  }
+  function buildPeerAvatar(name){
+    const g=new THREE.Group();
+    const body=new THREE.Mesh(new THREE.CylinderGeometry(.28,.34,1.3,10),
+      new THREE.MeshStandardMaterial({color:0x8a6a2a,emissive:0x3a2a0a,emissiveIntensity:.4,roughness:.7}));
+    body.position.y=.65; g.add(body);
+    const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),
+      new THREE.MeshStandardMaterial({color:0xd8c39a,roughness:.8}));
+    head.position.y=1.42; g.add(head);
+    const label=makeNameSprite(name); label.position.y=1.85; g.add(label);
+    scene.add(g);
+    return {group:g,target:null,targetYaw:0};
+  }
+  function makeNameSprite(name){
+    const cv=document.createElement('canvas'); cv.width=256; cv.height=64;
+    const c=cv.getContext('2d');
+    c.font='bold 28px monospace'; c.textAlign='center';
+    c.fillStyle='rgba(5,7,5,.55)'; c.fillRect(0,10,256,44);
+    c.fillStyle='#e8c15a'; c.fillText(name.slice(0,16),128,42);
+    const t=new THREE.CanvasTexture(cv);
+    const s=new THREE.Sprite(new THREE.SpriteMaterial({map:t,depthTest:false,transparent:true}));
+    s.scale.set(1.6,.4,1); s.renderOrder=999;
+    return s;
+  }
+
+  function toggleIngameChat(){
+    ingameChatOn=!ingameChatOn;
+    $('mpIngameChat').classList.toggle('on',ingameChatOn);
+    if(ingameChatOn){ document.exitPointerLock&&document.exitPointerLock(); $('mpIngameChatInput').focus(); }
+  }
+
+  function wireDom(){
+    $('mpOnlineBtn').onclick=open;
+    $('mpOnlineClose').onclick=closeOnline;
+    $('mpPseudoSave').onclick=()=>savePseudo($('mpPseudoInput').value);
+    $('mpInviteAccept').onclick=acceptInvite;
+    $('mpInviteDecline').onclick=declineInvite;
+    $('mpLobbyLeave').onclick=leaveRoom;
+    $('mpReadyBtn').onclick=toggleReady;
+    $('mpStartBtn').onclick=startGame;
+    $('mpLobbyChatForm').onsubmit=e=>{ e.preventDefault(); const i=$('mpLobbyChatInput'); sendChat(i.value); i.value=''; };
+    $('mpIngameChatForm').onsubmit=e=>{
+      e.preventDefault(); const i=$('mpIngameChatInput'); sendChat(i.value); i.value='';
+      toggleIngameChat(); if(!IS_TOUCH)$('game').requestPointerLock&&$('game').requestPointerLock();
+    };
+    ['mpPseudoInput','mpLobbyChatInput','mpIngameChatInput'].forEach(id=>{
+      const el=$(id); if(!el)return;
+      el.addEventListener('focus',()=>chatFocused=true);
+      el.addEventListener('blur',()=>chatFocused=false);
+    });
+    if(IS_TOUCH){ const b=$('btnChat'); if(b)b.addEventListener('touchstart',e=>{e.preventDefault();toggleIngameChat();},{passive:false}); }
+  }
+
+  return { init,wireDom,tick,toggleIngameChat,
+    get chatFocused(){ return chatFocused; },
+    get inGame(){ return !!room; } };
+})();
+MP.init();
+MP.wireDom();
+
 /* ---------------- boucle ---------------- */
 function collides(x,z){
   const r=.34, y=player.pos.y;
@@ -2086,7 +2556,7 @@ function animate(){
   // mouvement
   const termOpen=$('terminal').style.display==='flex';
   let mx=0,mz=0;
-  if(!termOpen&&!ended){
+  if(!termOpen&&!ended&&!MP.chatFocused){
     if(keys['KeyW']||keys['ArrowUp'])mz-=1;
     if(keys['KeyS']||keys['ArrowDown'])mz+=1;
     if(keys['KeyA']||keys['ArrowLeft'])mx-=1;
@@ -2146,6 +2616,7 @@ function animate(){
   // updaters de niveau
   for(const u of updaters)u(dt);
   vhsTick(dt);
+  MP.tick(dt);
   // grain animé
   if(((t*10)|0)%2===0)$('grain').style.transform=`translate(${(t*97|0)%14}px,${(t*61|0)%14}px)`;
   updateHUD();

@@ -1,8 +1,9 @@
-const CACHE = 'meg-backrooms-v1';
+const CACHE = 'meg-backrooms-v2';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './mp-config.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-192.png',
