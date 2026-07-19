@@ -85,6 +85,22 @@ create trigger mp_room_capacity_trigger
 
 -- ---------------------------------------------------------------------
 -- Realtime : diffuse les changements de mp_rooms / mp_room_members
+-- (vérifie l'appartenance avant d'ajouter, sinon "alter publication ...
+-- add table" échoue si la table y est déjà — ce qui annulerait le reste
+-- du script lors d'une ré-exécution)
 -- ---------------------------------------------------------------------
-alter publication supabase_realtime add table mp_rooms;
-alter publication supabase_realtime add table mp_room_members;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='mp_rooms'
+  ) then
+    alter publication supabase_realtime add table mp_rooms;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='mp_room_members'
+  ) then
+    alter publication supabase_realtime add table mp_room_members;
+  end if;
+end $$;
