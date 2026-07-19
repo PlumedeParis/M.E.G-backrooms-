@@ -280,7 +280,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v2</div>
+  <div id="verTag" class="px">v3</div>
 </div>
 
 <div id="mpOnline">
@@ -517,7 +517,7 @@ function tex(w,h,draw,rx,ry){
   draw(cv.getContext('2d'),w,h);
   const t=new THREE.CanvasTexture(cv);
   t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(rx||1,ry||1);
-  t.encoding=THREE.sRGBEncoding; t.anisotropy=4;
+  t.encoding=THREE.sRGBEncoding; t.anisotropy=8;
   t.sourceCanvas=cv;
   return t;
 }
@@ -542,7 +542,7 @@ function bumpToNormal(srcTex,strength){
   octx.putImageData(img,0,0);
   const t=new THREE.CanvasTexture(out);
   t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.copy(srcTex.repeat);
-  t.encoding=THREE.LinearEncoding; t.anisotropy=4;
+  t.encoding=THREE.LinearEncoding; t.anisotropy=8;
   return t;
 }
 function grime(ctx,w,h,n,alpha,dark){
@@ -649,6 +649,35 @@ function buildTextures(){
     }
     speckle(c,w,h,2500,.2);
   },3,2);
+  // bois véritable (planches + fil du bois + nœuds) — remplace l'ancien matériau "wood" qui
+  // réutilisait la texture de béton simplement teintée en marron
+  TX.wood=tex(512,512,(c,w,h)=>{
+    c.fillStyle='#7a5638'; c.fillRect(0,0,w,h);
+    const plankH=64;
+    for(let y=0;y<h;y+=plankH){
+      const base=rand(-14,14);
+      c.fillStyle=`rgb(${122+base|0},${86+base*.7|0},${56+base*.5|0})`;
+      c.fillRect(0,y,w,plankH);
+      // fil du bois : longues stries horizontales ondulées
+      for(let i=0;i<7;i++){
+        const yy=y+rand(4,plankH-4);
+        c.strokeStyle=`rgba(40,24,10,${rand(.08,.22)})`; c.lineWidth=rand(.6,1.8);
+        c.beginPath(); c.moveTo(0,yy);
+        for(let x=0;x<=w;x+=32) c.lineTo(x,yy+Math.sin(x*.04+i)*2.4+rand(-1,1));
+        c.stroke();
+      }
+      // nœuds occasionnels
+      if(Math.random()<.6){
+        const kx=rand(20,w-20), ky=y+plankH/2+rand(-8,8), kr=rand(4,9);
+        const g=c.createRadialGradient(kx,ky,0,kx,ky,kr);
+        g.addColorStop(0,'rgba(30,18,8,.75)'); g.addColorStop(.6,'rgba(40,24,10,.4)'); g.addColorStop(1,'rgba(40,24,10,0)');
+        c.fillStyle=g; c.beginPath(); c.arc(kx,ky,kr,0,Math.PI*2); c.fill();
+      }
+      // joint entre planches
+      c.fillStyle='rgba(20,12,6,.5)'; c.fillRect(0,y+plankH-2,w,2);
+    }
+    speckle(c,w,h,1400,.06); grime(c,w,h,18,.06,true);
+  },3,2);
   // bump aléatoire pour l'eau (utilisé comme normalMap animée)
   TX.waterN=tex(256,256,(c,w,h)=>{
     const img=c.createImageData(w,h);
@@ -684,6 +713,11 @@ function buildTextures(){
   TX.metalN=bumpToNormal(TX.metal,3.2);
   TX.brickN=bumpToNormal(TX.brick,3.6);
   TX.carpetN=bumpToNormal(TX.carpet,2.2);
+  TX.woodN=bumpToNormal(TX.wood,2.8);
+  TX.ceilN=bumpToNormal(TX.ceil,1.4);
+  TX.hubN=bumpToNormal(TX.hub,1.6);
+  TX.hotelFloorN=bumpToNormal(TX.hotelFloor,1.4);
+  TX.hotelDoorsN=bumpToNormal(TX.hotelDoors,2.2);
 }
 
 /* ---------------- moteur ---------------- */
@@ -764,8 +798,8 @@ function setupPostFX(){
     composer=new THREE.EffectComposer(renderer);
     composer.setSize(innerWidth,innerHeight);
     composer.addPass(new THREE.RenderPass(scene,camera));
-    bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .5, .65, .18);
-    bloomPass.threshold=.18; bloomPass.strength=.5; bloomPass.radius=.55;
+    bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .5, .68, .18);
+    bloomPass.threshold=.18; bloomPass.strength=.5; bloomPass.radius=.68;
     composer.addPass(bloomPass);
     vhsPass=new THREE.ShaderPass(VHSShader);
     vhsPass.enabled=false;
@@ -903,28 +937,28 @@ const MAT={};
 function mats(){
   MAT.wall=new THREE.MeshStandardMaterial({map:TX.wall,normalMap:TX.wallN,normalScale:new THREE.Vector2(.6,.6),roughness:.92});
   MAT.carpet=new THREE.MeshStandardMaterial({map:TX.carpet,normalMap:TX.carpetN,normalScale:new THREE.Vector2(.5,.5),roughness:1});
-  MAT.ceil=new THREE.MeshStandardMaterial({map:TX.ceil,roughness:.95});
+  MAT.ceil=new THREE.MeshStandardMaterial({map:TX.ceil,normalMap:TX.ceilN,normalScale:new THREE.Vector2(.35,.35),roughness:.95});
   MAT.conc=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.7,.7),roughness:.95});
   MAT.concD=new THREE.MeshStandardMaterial({map:TX.concDark,normalMap:TX.concDN,normalScale:new THREE.Vector2(.7,.7),roughness:.98});
   MAT.tile=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.4,.4),
     roughness:.62,metalness:.02,color:0x6a7678});
   MAT.metal=new THREE.MeshStandardMaterial({map:TX.metal,normalMap:TX.metalN,normalScale:new THREE.Vector2(.8,.8),roughness:.5,metalness:.7});
-  MAT.hub=new THREE.MeshStandardMaterial({map:TX.hub,roughness:.8});
+  MAT.hub=new THREE.MeshStandardMaterial({map:TX.hub,normalMap:TX.hubN,normalScale:new THREE.Vector2(.4,.4),roughness:.8});
   MAT.brick=new THREE.MeshStandardMaterial({map:TX.brick,normalMap:TX.brickN,normalScale:new THREE.Vector2(1,1),roughness:.95});
   MAT.black=new THREE.MeshBasicMaterial({color:0x060606});
   MAT.lightPanel=new THREE.MeshBasicMaterial({color:0xfff8e4});
   // teintes dérivées pour les niveaux supplémentaires (relief hérité de la texture de base)
   MAT.mallFloor=new THREE.MeshStandardMaterial({map:TX.carpet,normalMap:TX.carpetN,normalScale:new THREE.Vector2(.5,.5),roughness:.95,color:0x384a3c});
   MAT.mallWall=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.5,.5),roughness:.85,color:0xb8ab94});
-  MAT.hotelCarpet=new THREE.MeshStandardMaterial({map:TX.hotelFloor,roughness:.9});
-  MAT.hotelWall=new THREE.MeshStandardMaterial({map:TX.hotelDoors,roughness:.85});
+  MAT.hotelCarpet=new THREE.MeshStandardMaterial({map:TX.hotelFloor,normalMap:TX.hotelFloorN,normalScale:new THREE.Vector2(.3,.3),roughness:.9});
+  MAT.hotelWall=new THREE.MeshStandardMaterial({map:TX.hotelDoors,normalMap:TX.hotelDoorsN,normalScale:new THREE.Vector2(.5,.5),roughness:.85});
   MAT.metro=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.35,.35),roughness:.35,metalness:.04,color:0xcbbfa0});
   MAT.crimson=new THREE.MeshStandardMaterial({map:TX.wall,normalMap:TX.wallN,normalScale:new THREE.Vector2(.55,.55),roughness:.9,color:0x8a5050});
   MAT.crimsonFloor=new THREE.MeshStandardMaterial({map:TX.carpet,normalMap:TX.carpetN,normalScale:new THREE.Vector2(.45,.45),roughness:.95,color:0x9a8a6a});
-  MAT.officeCeil=new THREE.MeshStandardMaterial({map:TX.ceil,roughness:.9,color:0xc9baa0});
+  MAT.officeCeil=new THREE.MeshStandardMaterial({map:TX.ceil,normalMap:TX.ceilN,normalScale:new THREE.Vector2(.35,.35),roughness:.9,color:0xc9baa0});
   MAT.frozen=new THREE.MeshStandardMaterial({map:TX.concD,normalMap:TX.concDN,normalScale:new THREE.Vector2(.4,.4),roughness:.72,metalness:.03,color:0x7d97a3});
   MAT.frozenFloor=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.3,.3),roughness:.55,metalness:.04,color:0x8fabb8});
-  MAT.wood=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.5,.5),roughness:.85,color:0x6b4a2e});
+  MAT.wood=new THREE.MeshStandardMaterial({map:TX.wood,normalMap:TX.woodN,normalScale:new THREE.Vector2(.55,.55),roughness:.78});
   MAT.obs=new THREE.MeshStandardMaterial({map:TX.metal,normalMap:TX.metalN,normalScale:new THREE.Vector2(.7,.7),roughness:.4,metalness:.75,color:0x232c42});
 }
 function box(w,h,d,mat,x,y,z,o){
@@ -1394,7 +1428,7 @@ function buildPool(){
   waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,waterY,dcz);
   levelGroup.add(waterMesh);
   // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement)
-  const rt=new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
+  const rt=new THREE.WebGLCubeRenderTarget(IS_TOUCH?128:256,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
   const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,waterY+1.1,dcz); scene.add(cc);
   function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
     wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
@@ -2002,7 +2036,7 @@ function buildLibrary(){
   scene.add(new THREE.AmbientLight(0x4a3a24,.28));
   scene.add(new THREE.HemisphereLight(0xd8c090,0x1a1208,.26));
   const NX=15,NZ=15,C=6,H=4.4,ox=-NX*C/2,oz=-NZ*C/2;
-  const libCarpet=new THREE.MeshStandardMaterial({map:TX.carpet,roughness:.95,color:0x2a3a5a});
+  const libCarpet=new THREE.MeshStandardMaterial({map:TX.carpet,normalMap:TX.carpetN,normalScale:new THREE.Vector2(.45,.45),roughness:.95,color:0x2a3a5a});
   const grid=genDungeon(NX,NZ,{extraOpen:.3,elevChance:0,maxElev:0});
   const dungeon=buildDungeon(grid,{ox,oz,C,H,matWall:MAT.wood,matFloor:libCarpet,matCeil:MAT.ceil,
     pillarChance:0,lightChance:.14,weirdChance:.2,clutterChance:.1});
