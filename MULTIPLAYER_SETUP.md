@@ -1,9 +1,8 @@
 # Configuration du mode Online Play
 
 Le mode multijoueur s'appuie sur [Supabase](https://supabase.com) (Postgres +
-Realtime) pour la présence des joueurs, les invitations, les salons et la
-synchronisation en jeu. Le site reste 100% statique — aucun serveur à
-héberger de votre côté.
+Realtime) pour les salons par code et la synchronisation en jeu. Le site
+reste 100% statique — aucun serveur à héberger de votre côté.
 
 ## 1. Créer le projet Supabase
 
@@ -14,6 +13,10 @@ héberger de votre côté.
 3. Dans **SQL Editor**, collez et exécutez le contenu de
    [`supabase-schema.sql`](./supabase-schema.sql) (tables `mp_rooms` /
    `mp_room_members`, règles de sécurité, activation du Realtime).
+   **Si vous aviez déjà exécuté une version précédente de ce script**,
+   ré-exécutez-le quand même : il ajoute la colonne `mp_rooms.code`
+   nécessaire au nouveau système de salon par code, sans toucher aux
+   données existantes (le script est idempotent).
 4. Dans **Project Settings → API**, copiez :
    - `Project URL`
    - la clé `anon public`
@@ -38,11 +41,15 @@ La clé `anon` est conçue pour être publique côté client — c'est la sécur
 au niveau des lignes (RLS), déjà incluse dans `supabase-schema.sql`, qui
 protège les données (un joueur ne peut modifier que ses propres lignes).
 
-## 3. Ce qui est livré dans cette première version
+## 3. Comment ça marche (salon par code)
 
 - Bouton **Online Play** dans le menu principal.
-- Liste des joueurs en ligne (présence Realtime) avec bouton **Inviter**.
-- Notifications d'invitation (Accepter / Refuser).
+- **Créer un salon** : génère un code court (5 caractères, ex. `K3PQX`) à
+  transmettre aux coéquipiers (message, vocal, etc.). Le code s'affiche
+  dans l'écran du salon avec un bouton **Copier**.
+- **Rejoindre avec un code** : les autres joueurs saisissent ce code pour
+  rejoindre le salon instantanément — pas de liste de joueurs en ligne ni
+  d'invitation à attendre.
 - Salon (lobby) : pseudo, niveau, statut prêt, places restantes,
   sélection du niveau/mission par le chef vue en temps réel, chat de groupe.
 - **Start Game** (chef d'équipe uniquement) avec animation de chargement,
