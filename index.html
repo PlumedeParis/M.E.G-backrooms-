@@ -280,7 +280,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v5</div>
+  <div id="verTag" class="px">v6</div>
 </div>
 
 <div id="mpOnline">
@@ -2136,9 +2136,10 @@ function buildLibrary(){
 
 /* ========== LEVEL 100 — THE OBSERVATORY ========== */
 function buildObservatory(){
-  scene.fog=new THREE.FogExp2(0x05060c,.02);
+  scene.fog=new THREE.FogExp2(0x05060c,.012);
   renderer.setClearColor(0x05060c);
-  scene.add(new THREE.AmbientLight(0x1a1e30,.34));
+  scene.add(new THREE.AmbientLight(0x4a5a88,1.2));
+  scene.add(new THREE.HemisphereLight(0xcfe0ff,0x2a3050,.7));
   const R=16+((Math.random()*10)|0),H=9,seg=28;
   const floorGeo=new THREE.CylinderGeometry(R,R,.2,seg);
   const floor=new THREE.Mesh(floorGeo,MAT.obs); floor.position.y=-.1; levelGroup.add(floor);
@@ -2162,7 +2163,7 @@ function buildObservatory(){
   tele.rotation.z=rand(.4,.9); tele.rotation.y=rand(0,Math.PI*2);
   tele.position.set(0,1.6,0); tele.castShadow=true; levelGroup.add(tele);
   colliders.push({minx:-1.2,maxx:1.2,minz:-1.2,maxz:1.2,top:2.6,bot:0});
-  pointLight(0,3,0,0x9ab8ff,.55,17);
+  pointLight(0,3,0,0x9ab8ff,2.6,R*2.4);
   const angOffset=rand(0,Math.PI*2);
   spawnHostile('conductor',[0,1,2,3].map(k=>{ const a=Math.PI/2*k+angOffset+Math.PI/8;
     return V3(Math.cos(a)*(R*.6),0,Math.sin(a)*(R*.6)); }));
@@ -2176,7 +2177,7 @@ function buildObservatory(){
     const orb=new THREE.Mesh(new THREE.SphereGeometry(.3,12,10),
       new THREE.MeshBasicMaterial({color:[0xff6a4a,0x4ad8ff,0xffe14a,0xa04aff][i]}));
     orb.position.copy(p); levelGroup.add(orb);
-    const gl=pointLight(p.x,p.y,p.z,orb.material.color.getHex(),.8,8);
+    const gl=pointLight(p.x,p.y,p.z,orb.material.color.getHex(),1.8,18);
     updaters.push(dt=>{orb.position.y=p.y+Math.sin(clock.elapsedTime*.6+i)*.4;gl.position.copy(orb.position);});
   });
   player.pos.set(0,1.65,R-2.5); player.yaw=Math.PI;
@@ -2192,7 +2193,7 @@ function buildObservatory(){
       const scr=new THREE.Mesh(new THREE.PlaneGeometry(.5,.36),new THREE.MeshBasicMaterial({map:scrT}));
       scr.position.set(-2.9+k*.7,1.14,cz-.4); levelGroup.add(scr);
     }
-    pointLight(-2.2,1.4,cz,0x57e389,.4,4);
+    pointLight(-2.2,1.4,cz,0x57e389,1.4,11);
     for(let k=0;k<3;k++)
       box(.7,2,.5,MAT.metal,3+k*.9,1,cz,{cast:true}); // racks serveurs
   }
