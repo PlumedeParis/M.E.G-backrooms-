@@ -1,4 +1,4 @@
-const CACHE = 'meg-backrooms-v4';
+const CACHE = 'meg-backrooms-v5';
 const ASSETS = [
   './',
   './index.html',
