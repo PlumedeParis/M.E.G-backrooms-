@@ -280,7 +280,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v3</div>
+  <div id="verTag" class="px">v5</div>
 </div>
 
 <div id="mpOnline">
@@ -414,7 +414,7 @@ const IS_TOUCH='ontouchstart' in window;
 const S = {
   hp:100, lv:1, xp:0, credits:120,
   batteries:2, medkits:2, flares:1, uvMarkers:0,
-  lampPower:1, proCam:false, motionDetector:false, compassOwned:false, binoculars:false,
+  lampPower:1, proCam:false, motionDetector:false, compassOwned:false, binoculars:false, uvMarkersOwned:false,
   completed:{},           // levelId -> true
   entitiesSeen:{},        // id -> true
   logs:{},                // id -> true
@@ -424,7 +424,8 @@ const xpNeed=lv=>500+lv*30;
 async function save(){
   try{ await window.storage.set('meg-save', JSON.stringify({
     lv:S.lv,xp:S.xp,credits:S.credits,batteries:S.batteries,medkits:S.medkits,flares:S.flares,uvMarkers:S.uvMarkers,
-    lampPower:S.lampPower,proCam:S.proCam,motionDetector:S.motionDetector,compassOwned:S.compassOwned,binoculars:S.binoculars,completed:S.completed,
+    lampPower:S.lampPower,proCam:S.proCam,motionDetector:S.motionDetector,compassOwned:S.compassOwned,binoculars:S.binoculars,
+    uvMarkersOwned:S.uvMarkersOwned,completed:S.completed,
     entitiesSeen:S.entitiesSeen,logs:S.logs})); }catch(e){}
 }
 async function load(){
@@ -594,7 +595,8 @@ function buildTextures(){
     c.fillStyle='#3a3a3e'; c.fillRect(0,0,w,h);
     speckle(c,w,h,6000,.3); grime(c,w,h,40,.1,true);
   },5,5);
-  // carrelage piscine
+  // carrelage piscine — réservé aux Poolrooms (Metro et Frozen Corridors ont chacun leur propre
+  // texture ci-dessous, pour ne plus partager visuellement le même sol qu'un niveau sans rapport)
   TX.tile=tex(512,512,(c,w,h)=>{
     c.fillStyle='#e9edee'; c.fillRect(0,0,w,h);
     c.strokeStyle='#b9c2c6'; c.lineWidth=4;
@@ -603,6 +605,36 @@ function buildTextures(){
     for(let y=0;y<=h;y+=s){c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();}
     speckle(c,w,h,900,.05);
   },6,6);
+  // faïence de station de métro — carreaux rectangulaires en quinconce (façon carrelage de tunnel
+  // piéton), motif bien distinct du quadrillage carré des Poolrooms
+  TX.metro=tex(512,512,(c,w,h)=>{
+    c.fillStyle='#c7bda2'; c.fillRect(0,0,w,h);
+    const tw=86,th=40;
+    for(let y=0,r=0;y<h;y+=th,r++){
+      for(let x=-(r%2)*tw/2;x<w;x+=tw){
+        const shade=rand(-10,10);
+        c.fillStyle=`rgb(${205+shade|0},${196+shade|0},${172+shade|0})`;
+        c.fillRect(x+2,y+2,tw-4,th-4);
+      }
+    }
+    speckle(c,w,h,1600,.08); grime(c,w,h,22,.07,true);
+  },3,2);
+  // sol/parois gelés — givre craquelé, bien plus froid et cristallin que le carrelage des Poolrooms
+  TX.ice=tex(512,512,(c,w,h)=>{
+    c.fillStyle='#c9e4ee'; c.fillRect(0,0,w,h);
+    for(let i=0;i<1800;i++){ c.fillStyle=`rgba(255,255,255,${Math.random()*.5})`;
+      c.fillRect(Math.random()*w,Math.random()*h,rand(1,3),rand(1,3)); }
+    // craquelures de glace
+    c.strokeStyle='rgba(140,190,210,.4)';
+    for(let i=0;i<26;i++){
+      let x=Math.random()*w,y=Math.random()*h;
+      c.lineWidth=rand(.6,1.6); c.beginPath(); c.moveTo(x,y);
+      const branches=(2+Math.random()*3)|0;
+      for(let b=0;b<branches;b++){ x+=rand(-60,60); y+=rand(-60,60); c.lineTo(x,y); }
+      c.stroke();
+    }
+    grime(c,w,h,10,.05,false);
+  },5,5);
   // métal
   TX.metal=tex(512,512,(c,w,h)=>{
     c.fillStyle='#4c4f55'; c.fillRect(0,0,w,h);
@@ -710,6 +742,8 @@ function buildTextures(){
   TX.concN=bumpToNormal(TX.conc,2.6);
   TX.concDN=bumpToNormal(TX.concDark,2.6);
   TX.tileN=bumpToNormal(TX.tile,1.6);
+  TX.metroN=bumpToNormal(TX.metro,2.2);
+  TX.iceN=bumpToNormal(TX.ice,1.2);
   TX.metalN=bumpToNormal(TX.metal,3.2);
   TX.brickN=bumpToNormal(TX.brick,3.6);
   TX.carpetN=bumpToNormal(TX.carpet,2.2);
@@ -723,7 +757,9 @@ function buildTextures(){
 /* ---------------- moteur ---------------- */
 let renderer,scene,camera,clock;
 let levelGroup=null, colliders=[], interactables=[], photoTargets=[], updaters=[];
-let waterMesh=null, dust=null, flashlight=null, flCone=null, waterBounds=null;
+let dust=null, flashlight=null, flCone=null;
+let waterZones=[]; // {minx,maxx,minz,maxz} par piscine — plusieurs bassins possibles (ex. Poolrooms)
+let levelDisposables=[]; // ressources GPU (render targets, etc.) créées pour le niveau courant — libérées à chaque changement de niveau
 let terrainSample=null; // fonction (x,z)=>hauteur de sol locale, pour les niveaux à relief (escaliers/plateformes)
 let elevatorPos=null, missionTimer=0, missionTimerActive=false, compassOn=false, paused=false;
 let levelGrid=null, levelDungeon=null, compassMarkers=[], compassRecalcT=0;
@@ -952,12 +988,12 @@ function mats(){
   MAT.mallWall=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.5,.5),roughness:.85,color:0xb8ab94});
   MAT.hotelCarpet=new THREE.MeshStandardMaterial({map:TX.hotelFloor,normalMap:TX.hotelFloorN,normalScale:new THREE.Vector2(.3,.3),roughness:.9});
   MAT.hotelWall=new THREE.MeshStandardMaterial({map:TX.hotelDoors,normalMap:TX.hotelDoorsN,normalScale:new THREE.Vector2(.5,.5),roughness:.85});
-  MAT.metro=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.35,.35),roughness:.35,metalness:.04,color:0xcbbfa0});
+  MAT.metro=new THREE.MeshStandardMaterial({map:TX.metro,normalMap:TX.metroN,normalScale:new THREE.Vector2(.5,.5),roughness:.4,metalness:.04});
   MAT.crimson=new THREE.MeshStandardMaterial({map:TX.wall,normalMap:TX.wallN,normalScale:new THREE.Vector2(.55,.55),roughness:.9,color:0x8a5050});
   MAT.crimsonFloor=new THREE.MeshStandardMaterial({map:TX.carpet,normalMap:TX.carpetN,normalScale:new THREE.Vector2(.45,.45),roughness:.95,color:0x9a8a6a});
   MAT.officeCeil=new THREE.MeshStandardMaterial({map:TX.ceil,normalMap:TX.ceilN,normalScale:new THREE.Vector2(.35,.35),roughness:.9,color:0xc9baa0});
   MAT.frozen=new THREE.MeshStandardMaterial({map:TX.concD,normalMap:TX.concDN,normalScale:new THREE.Vector2(.4,.4),roughness:.72,metalness:.03,color:0x7d97a3});
-  MAT.frozenFloor=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.3,.3),roughness:.55,metalness:.04,color:0x8fabb8});
+  MAT.frozenFloor=new THREE.MeshStandardMaterial({map:TX.ice,normalMap:TX.iceN,normalScale:new THREE.Vector2(.35,.35),roughness:.3,metalness:.06});
   MAT.wood=new THREE.MeshStandardMaterial({map:TX.wood,normalMap:TX.woodN,normalScale:new THREE.Vector2(.55,.55),roughness:.78});
   MAT.obs=new THREE.MeshStandardMaterial({map:TX.metal,normalMap:TX.metalN,normalScale:new THREE.Vector2(.7,.7),roughness:.4,metalness:.75,color:0x232c42});
 }
@@ -993,8 +1029,9 @@ function addPhotoTarget(pos,name){
 function clearLevel(){
   if(levelGroup){scene.remove(levelGroup);
     levelGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
+  levelDisposables.forEach(o=>{try{o.dispose();}catch(e){}}); levelDisposables=[];
   levelGroup=new THREE.Group(); scene.add(levelGroup);
-  colliders=[]; interactables=[]; photoTargets=[]; updaters=[]; waterMesh=null; terrainSample=null; waterBounds=null;
+  colliders=[]; interactables=[]; photoTargets=[]; updaters=[]; waterZones=[]; terrainSample=null;
   elevatorPos=null; missionTimerActive=false; levelGrid=null; levelDungeon=null;
   compassMarkers.forEach(m=>scene.remove(m)); compassMarkers=[]; hostileSprites=[];
   scene.children.filter(c=>c.isLight&&c!==flashlight).forEach(c=>scene.remove(c));
@@ -1392,54 +1429,98 @@ function buildPool(){
   // bande à plafond haut (atrium) — position aléatoire à chaque génération
   const atriumI0=3+((Math.random()*(NX-8))|0), atriumW=3+((Math.random()*3)|0);
   const hAt=(i)=>(i>=atriumI0&&i<atriumI0+atriumW)?H2:H;
-  // zone inondée : rectangle de cellules contigu, creusé en piscine enterrée sous le niveau du sol
-  // (calculée AVANT la génération du sol pour que ces cellules soient laissées creuses — sans ça
-  // le carrelage plat masquait entièrement la piscine et on tombait dedans sans la voir)
-  const fx0=2+((Math.random()*(NX-9))|0), fz0=1+((Math.random()*(NZ-6))|0);
-  const fw=4+((Math.random()*3)|0), fd=3+((Math.random()*3)|0);
-  const inFlood=(i,j)=>i>=fx0&&i<fx0+fw&&j>=fz0&&j<fz0+fd;
+  // plusieurs bassins (2 à 3), chacun un rectangle de cellules contigu, creusé en piscine
+  // enterrée sous le niveau du sol (calculés AVANT la génération du sol pour que ces cellules
+  // soient laissées creuses — sans ça le carrelage plat masquait entièrement la piscine et on
+  // tombait dedans sans la voir). Placement avec tirages successifs pour éviter que deux bassins
+  // ne se chevauchent ou se touchent directement.
+  const poolCount=2+((Math.random()*2)|0);
+  const pools=[];
+  for(let n=0;n<poolCount;n++){
+    for(let attempt=0;attempt<40;attempt++){
+      const fw=3+((Math.random()*3)|0), fd=2+((Math.random()*3)|0);
+      const fx0=2+((Math.random()*(NX-4-fw))|0), fz0=1+((Math.random()*(NZ-2-fd))|0);
+      const overlaps=pools.some(p=>fx0<p.fx0+p.fw+1&&fx0+fw+1>p.fx0&&fz0<p.fz0+p.fd+1&&fz0+fd+1>p.fz0);
+      if(!overlaps){ pools.push({fx0,fz0,fw,fd}); break; }
+    }
+  }
+  const inFlood=(i,j)=>pools.some(p=>i>=p.fx0&&i<p.fx0+p.fw&&j>=p.fz0&&j<p.fz0+p.fd);
   const grid=genDungeon(NX,NZ,{extraOpen:.32,elevChance:0,maxElev:0});
-  // une seule piscine ouverte, sans mur intérieur qui la couperait en compartiments
+  // piscines ouvertes, sans mur intérieur qui les couperait en compartiments
   for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++) if(inFlood(i-1,j)&&inFlood(i,j)) grid.vw[i][j]=false;
   for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++) if(inFlood(i,j-1)&&inFlood(i,j)) grid.hw[i][j]=false;
   const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
     pillarChance:.05,lightChance:.18,weirdChance:.2,skipFloor:inFlood,clutterChance:.1});
   levelGrid=grid; levelDungeon=dungeon;
-  const wminx=ox+fx0*C, wmaxx=ox+(fx0+fw)*C, wminz=oz+fz0*C, wmaxz=oz+(fz0+fd)*C;
-  waterBounds={minx:wminx,maxx:wmaxx,minz:wminz,maxz:wmaxz};
-  const dcx=(wminx+wmaxx)/2, dcz=(wminz+wmaxz)/2;
-  const poolDepth=1.3;
-  // le sol suit le relief normal partout, sauf dans le bassin où il descend en douceur
+  const poolDepth=1.3, waterY=-poolDepth+.45;
+  // le sol suit le relief normal partout, sauf dans un bassin où il descend en douceur
   terrainSample=(x,z)=>{
-    if(waterBounds&&x>waterBounds.minx&&x<waterBounds.maxx&&z>waterBounds.minz&&z<waterBounds.maxz) return -poolDepth;
+    for(const wz of waterZones) if(x>wz.minx&&x<wz.maxx&&z>wz.minz&&z<wz.maxz) return -poolDepth;
     return dungeon.floorAt(x,z);
   };
-  // fond du bassin + rebords (purement décoratifs, jamais collidants : la descente se fait par le relief, pas par un mur)
-  box(wmaxx-wminx,.2,wmaxz-wminz,MAT.tile,dcx,-poolDepth-.1,dcz,{col:false});
-  box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wminz,{col:false});
-  box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wmaxz,{col:false});
-  box(.25,poolDepth,wmaxz-wminz,MAT.tile,wminx,-poolDepth/2,dcz,{col:false});
-  box(.25,poolDepth,wmaxz-wminz,MAT.tile,wmaxx,-poolDepth/2,dcz,{col:false});
-  // eau — teinte sombre, reflets et spéculaire adoucis (évite l'effet miroir éblouissant)
-  const waterY=-poolDepth+.45;
-  const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x5a7986,shininess:70,
-    transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
-  waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(wmaxx-wminx,wmaxz-wminz,1,1),wm);
-  waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,waterY,dcz);
-  levelGroup.add(waterMesh);
-  // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement)
-  const rt=new THREE.WebGLCubeRenderTarget(IS_TOUCH?128:256,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
-  const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,waterY+1.1,dcz); scene.add(cc);
-  function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
-    wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
-  setTimeout(refreshReflection,60);
-  let reflectT=0,waterT=0;
-  updaters.push(dt=>{
-    TX.waterN.offset.x+=dt*.02; TX.waterN.offset.y+=dt*.015;
-    waterT+=dt; waterMesh.position.y=waterY+Math.sin(waterT*.6)*.03;
-    wm.normalScale.set(.24+Math.sin(waterT*.4)*.07,.24+Math.cos(waterT*.35)*.07);
-    reflectT+=dt; if(reflectT>1.8){ reflectT=0; refreshReflection(); }
+  pools.forEach((pool,pi)=>{
+    const {fx0,fz0,fw,fd}=pool;
+    const wminx=ox+fx0*C, wmaxx=ox+(fx0+fw)*C, wminz=oz+fz0*C, wmaxz=oz+(fz0+fd)*C;
+    waterZones.push({minx:wminx,maxx:wmaxx,minz:wminz,maxz:wmaxz});
+    const dcx=(wminx+wmaxx)/2, dcz=(wminz+wmaxz)/2;
+    // fond du bassin + rebords (purement décoratifs, jamais collidants : la descente se fait par le relief, pas par un mur)
+    box(wmaxx-wminx,.2,wmaxz-wminz,MAT.tile,dcx,-poolDepth-.1,dcz,{col:false});
+    box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wminz,{col:false});
+    box(wmaxx-wminx,poolDepth,.25,MAT.tile,dcx,-poolDepth/2,wmaxz,{col:false});
+    box(.25,poolDepth,wmaxz-wminz,MAT.tile,wminx,-poolDepth/2,dcz,{col:false});
+    box(.25,poolDepth,wmaxz-wminz,MAT.tile,wmaxx,-poolDepth/2,dcz,{col:false});
+    // eau — teinte sombre, reflets et spéculaire adoucis (évite l'effet miroir éblouissant)
+    const wm=new THREE.MeshPhongMaterial({color:0x4d6c78,specular:0x5a7986,shininess:70,
+      transparent:true,opacity:.9,normalMap:TX.waterN,normalScale:new THREE.Vector2(.28,.28)});
+    const waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(wmaxx-wminx,wmaxz-wminz,1,1),wm);
+    waterMesh.rotation.x=-Math.PI/2; waterMesh.position.set(dcx,waterY,dcz);
+    levelGroup.add(waterMesh);
+    // reflets : cube camera, rafraîchie périodiquement pour un reflet vivant (pas figé au chargement),
+    // déphasée par bassin pour éviter que tous les rafraîchissements tombent la même frame.
+    // rt est suivi dans levelDisposables et cc rattachée à levelGroup (pas scene directement) pour que
+    // tout soit bien libéré au changement de niveau — sans ça chaque visite des Poolrooms laissait une
+    // render target GPU orpheline, et le passage à plusieurs bassins aurait multiplié la fuite.
+    const rt=new THREE.WebGLCubeRenderTarget(IS_TOUCH?128:256,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
+    levelDisposables.push(rt);
+    const cc=new THREE.CubeCamera(.2,120,rt); cc.position.set(dcx,waterY+1.1,dcz); levelGroup.add(cc);
+    function refreshReflection(){ waterMesh.visible=false; cc.update(renderer,scene); waterMesh.visible=true;
+      wm.envMap=rt.texture; wm.combine=THREE.MixOperation; wm.reflectivity=.22; wm.needsUpdate=true; }
+    setTimeout(refreshReflection,60+pi*40);
+    let reflectT=-pi*.6,waterT=0;
+    updaters.push(dt=>{
+      waterT+=dt; waterMesh.position.y=waterY+Math.sin(waterT*.6+pi)*.03;
+      wm.normalScale.set(.24+Math.sin(waterT*.4+pi)*.07,.24+Math.cos(waterT*.35+pi)*.07);
+      reflectT+=dt; if(reflectT>1.8){ reflectT=0; refreshReflection(); }
+    });
+    // The Drowned — patrouille dans ce bassin, surgit si on s'approche trop en nageant
+    const drR=Math.max(2,Math.min(wmaxx-wminx,wmaxz-wminz)/2*.7);
+    const dr=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),
+      new THREE.MeshBasicMaterial({color:0x18262c,transparent:true,opacity:.5}));
+    const drY=-poolDepth+.25;
+    dr.scale.set(1,.4,2.2); dr.position.set(dcx,drY,dcz); levelGroup.add(dr);
+    let da=pi*2.1, drCd=0, drLunging=false;
+    updaters.push(dt=>{
+      if(drCd>0)drCd-=dt;
+      if(!drLunging){
+        da+=dt*.25; dr.position.set(dcx+Math.cos(da)*drR,drY-.03,dcz+Math.sin(da)*drR);
+        const d=dr.position.distanceTo(player.pos);
+        if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
+          toast('Entité cataloguée : THE DROWNED');thunk(.35);}
+        if(player.inWater&&d<3.4&&drCd<=0){
+          drLunging=true; blip(90,.6,.16,'sawtooth');
+        }
+      } else {
+        const dir=player.pos.clone().sub(dr.position); dir.y=0; dir.normalize();
+        dr.position.addScaledVector(dir,dt*2.4); dr.position.y=drY+.08;
+        if(dr.position.distanceTo(player.pos)<1.3){
+          jumpscare('drowned'); damage(16);
+          drLunging=false; drCd=rand(10,16); dr.position.y=drY-.03;
+        }
+      }
+    });
   });
+  TX.waterN.offset.x=0; TX.waterN.offset.y=0;
+  updaters.push(dt=>{ TX.waterN.offset.x+=dt*.02; TX.waterN.offset.y+=dt*.015; });
   // emplacements d'objectif — cellules reliées, loin de l'entrée
   const spots=dungeon.randomCells(3,4).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,p.y+1,p.z); });
   spots.forEach((p,i)=>{
@@ -1449,32 +1530,6 @@ function buildPool(){
     const gl=pointLight(p.x,p.y+.4,p.z,0xff5030,.9,7);
     updaters.push(dt=>{b.rotation.y+=dt*2;b.position.y=p.y+Math.sin(clock.elapsedTime*2+i)*.15;
       gl.intensity=.6+Math.sin(clock.elapsedTime*5+i)*.35;});
-  });
-  // The Drowned — patrouille dans la zone inondée, surgit si on s'approche trop en nageant
-  const drR=Math.max(2,Math.min(wmaxx-wminx,wmaxz-wminz)/2*.7);
-  const dr=new THREE.Mesh(new THREE.SphereGeometry(.5,8,6),
-    new THREE.MeshBasicMaterial({color:0x18262c,transparent:true,opacity:.5}));
-  const drY=-poolDepth+.25;
-  dr.scale.set(1,.4,2.2); dr.position.set(dcx,drY,dcz); levelGroup.add(dr);
-  let da=0, drCd=0, drLunging=false;
-  updaters.push(dt=>{
-    if(drCd>0)drCd-=dt;
-    if(!drLunging){
-      da+=dt*.25; dr.position.set(dcx+Math.cos(da)*drR,drY-.03,dcz+Math.sin(da)*drR);
-      const d=dr.position.distanceTo(player.pos);
-      if(d<5&&!S.entitiesSeen.drowned){S.entitiesSeen.drowned=true;
-        toast('Entité cataloguée : THE DROWNED');thunk(.35);}
-      if(player.inWater&&d<3.4&&drCd<=0){
-        drLunging=true; blip(90,.6,.16,'sawtooth');
-      }
-    } else {
-      const dir=player.pos.clone().sub(dr.position); dir.y=0; dir.normalize();
-      dr.position.addScaledVector(dir,dt*2.4); dr.position.y=drY+.08;
-      if(dr.position.distanceTo(player.pos)<1.3){
-        jumpscare('drowned'); damage(16);
-        drLunging=false; drCd=rand(10,16); dr.position.y=drY-.03;
-      }
-    }
   });
   spawnHostile('static',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
@@ -2182,6 +2237,10 @@ const CATS=[
   {id:'maintenance',    obj:'Réparer les installations défectueuses',   verb:'Réparer l\'installation', done:'Installation réparée'},
   {id:'collecte',       obj:'Collecter les objets classifiés',          verb:'Collecter l\'objet', done:'Objet collecté'},
   {id:'observation',    obj:'Observer les phénomènes actifs',           verb:'Observer le phénomène', done:'Phénomène observé'},
+  {id:'decontamination',obj:'Neutraliser les foyers de contamination',  verb:'Neutraliser le foyer', done:'Foyer neutralisé'},
+  {id:'triangulation',  obj:'Trianguler la source du signal anormal',   verb:'Trianguler le point', done:'Point triangulé'},
+  {id:'scellement',     obj:'Sceller les brèches instables',            verb:'Sceller la brèche', done:'Brèche scellée'},
+  {id:'extraction',     obj:'Extraire des échantillons biologiques',    verb:'Extraire l\'échantillon', done:'Échantillon extrait'},
 ];
 function setupRandomMission(id,spots,names){
   const cat=CATS[(Math.random()*CATS.length)|0];
@@ -2295,15 +2354,18 @@ const HOT=[
     if(S.hp>=100){ toast('Santé déjà au maximum'); blip(200,.2,.1); return; }
     S.medkits--;S.hp=clamp(S.hp+50,0,100);toast('Soins appliqués');blip(600,.2,.1);
   }},
-  {icon:'🧭',name:'Boussole',use:()=>toggleCompass()},
+  {icon:'🧭',name:'Boussole',owned:()=>S.compassOwned,use:()=>toggleCompass()},
   {icon:'🔥',name:'Fusée',qty:()=>S.flares,use:()=>dropFlare()},
-  {icon:'🔭',name:'Longue-vue',use:()=>toggleZoom()},
-  {icon:'📍',name:'Marqueur UV',qty:()=>S.uvMarkers,use:()=>dropUVMarker()},
+  {icon:'🔭',name:'Longue-vue',owned:()=>S.binoculars,use:()=>toggleZoom()},
+  {icon:'📍',name:'Marqueur UV',qty:()=>S.uvMarkers,owned:()=>S.uvMarkersOwned||S.uvMarkers>0,use:()=>dropUVMarker()},
 ];
+// n'affiche dans la barre d'objets que les items de base + ceux déjà achetés au terminal
+// (boussole / longue-vue / marqueurs UV) — le bouton reste caché tant qu'on ne l'a pas acheté
 function buildHotbar(){
   const hb=$('hotbar'); hb.innerHTML='';
   HOT.forEach((h,i)=>{
-    const d=document.createElement('div'); d.className='slot';
+    if(h.owned&&!h.owned())return;
+    const d=document.createElement('div'); d.className='slot'; d.dataset.hotIndex=i;
     d.innerHTML=`<span class="n">${i+1}</span>${h.icon}<span class="q"></span>`;
     d.onclick=()=>{h.use();updateHUD();};
     hb.appendChild(d);
@@ -2311,9 +2373,9 @@ function buildHotbar(){
   renderHotbar();
 }
 function renderHotbar(){
-  [...$('hotbar').children].forEach((d,i)=>{
-    const q=HOT[i].qty?HOT[i].qty():'';
-    d.querySelector('.q').textContent=q;
+  [...$('hotbar').children].forEach(d=>{
+    const h=HOT[+d.dataset.hotIndex];
+    d.querySelector('.q').textContent=h.qty?h.qty():'';
   });
 }
 
@@ -2410,9 +2472,9 @@ function bindInput(){
     if(document.pointerLockElement===cv&&vcx!==null&&vcy>innerHeight-100){
       const el=document.elementFromPoint(vcx,vcy);
       const slot=el&&el.closest('.slot');
-      if(slot){
-        const idx=[...$('hotbar').children].indexOf(slot);
-        if(idx>=0&&HOT[idx]){ HOT[idx].use(); updateHUD(); }
+      if(slot&&slot.dataset.hotIndex!==undefined){
+        const h=HOT[+slot.dataset.hotIndex];
+        if(h){ h.use(); updateHUD(); }
       }
     }
   });
@@ -2534,7 +2596,7 @@ function renderTerm(){
       ['Détecteur de mouvement',150,'Alerte quand une entité active s\'approche.',()=>S.motionDetector=true,()=>!S.motionDetector],
       ['Boussole',300,'Trace un chemin lumineux au sol jusqu\'à l\'ascenseur.',()=>S.compassOwned=true,()=>!S.compassOwned],
       ['Longue-vue',80,'Zoom optique pour repérer les entités de loin.',()=>S.binoculars=true,()=>!S.binoculars],
-      ['Lot de 3 marqueurs UV',45,'Balises fluo au sol pour retracer son chemin.',()=>S.uvMarkers=(S.uvMarkers||0)+3,()=>true],
+      ['Lot de 3 marqueurs UV',45,'Balises fluo au sol pour retracer son chemin.',()=>{S.uvMarkers=(S.uvMarkers||0)+3;S.uvMarkersOwned=true;},()=>true],
     ];
     items.forEach(([n,p,d,fn,av])=>{
       const el=document.createElement('div'); el.className='shopitem';
@@ -2542,7 +2604,7 @@ function renderTerm(){
       const btn=document.createElement('button'); btn.className='btn go';
       if(!av()){btn.textContent='Acquis';btn.disabled=true;btn.style.opacity=.4;}
       else{btn.textContent=p+' ◈';
-        btn.onclick=()=>{ if(S.credits>=p){S.credits-=p;fn();save();updateHUD();renderTerm();blip(900,.1,.12);}
+        btn.onclick=()=>{ if(S.credits>=p){S.credits-=p;fn();save();buildHotbar();updateHUD();renderTerm();blip(900,.1,.12);}
           else{toast('Crédits insuffisants');blip(200,.2,.1);} };}
       el.appendChild(btn); b.appendChild(el);
     });
@@ -2672,9 +2734,9 @@ $('muteBtn').onclick=()=>{
 $('resetSaveBtn').onclick=()=>{
   if(!confirm('Réinitialiser toute la progression (niveau, crédits, objets, secteurs validés) ? Cette action est irréversible.'))return;
   Object.assign(S,{hp:100,lv:1,xp:0,credits:120,batteries:2,medkits:2,flares:1,uvMarkers:0,lampPower:1,proCam:false,
-    motionDetector:false,compassOwned:false,binoculars:false,
+    motionDetector:false,compassOwned:false,binoculars:false,uvMarkersOwned:false,
     completed:{},entitiesSeen:{},logs:{},selectedMission:null});
-  save(); toast('Progression réinitialisée'); updateHUD();
+  save(); buildHotbar(); toast('Progression réinitialisée'); updateHUD();
 };
 
 /* ==================== MULTIJOUEUR — ONLINE PLAY ====================
@@ -3021,9 +3083,8 @@ function animate(){
     mx+=joy.x; mz+=joy.y;
   }
   const run=(keys['ShiftLeft']||keys['ShiftRight']||runHeld);
-  player.inWater=!!(waterMesh&&waterBounds&&player.pos.y<1.8&&
-    player.pos.x>waterBounds.minx&&player.pos.x<waterBounds.maxx&&
-    player.pos.z>waterBounds.minz&&player.pos.z<waterBounds.maxz);
+  player.inWater=player.pos.y<1.8&&waterZones.some(wz=>
+    player.pos.x>wz.minx&&player.pos.x<wz.maxx&&player.pos.z>wz.minz&&player.pos.z<wz.maxz);
   let sp=player.speed*(run?1.7:1)*(player.inWater?.55:1);
   const len=Math.hypot(mx,mz);
   if(len>0){
