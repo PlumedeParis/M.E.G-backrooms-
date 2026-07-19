@@ -1237,6 +1237,15 @@ function buildDungeon(grid,cfg){
   const fAt=(i,j)=>elev[clamp(j,0,NZ-1)][clamp(i,0,NX-1)]*eS;
   const weird=cfg.weirdChance||0;
   const skipFloor=cfg.skipFloor||(()=>false);
+  // cellules déjà occupées par un meuble/décor (chaise chelou, bric-à-brac) ou déjà tirées
+  // par un appel randomCells précédent (points de mission, monstres, étagères...) — sans ça,
+  // deux éléments pouvaient atterrir dans la même cellule et un point de mission se retrouvait
+  // caché sous un objet, invisible et impossible à valider.
+  const occupied=new Set();
+  // les cellules sans sol normal (ex : bassin des Poolrooms) ne doivent jamais recevoir de point
+  // de mission / monstre — sinon le marqueur flotte au-dessus de l'eau, loin du sol réel, et donne
+  // l'impression d'un point de validation absent ou inaccessible.
+  for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++) if(skipFloor(i,j)) occupied.add(i+','+j);
   const invertedSet=new Set();
   if(weird>0) order.forEach(([i,j])=>{ if((i||j)&&Math.random()<weird*.3) invertedSet.add(i+','+j); });
   for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++){
@@ -1264,12 +1273,16 @@ function buildDungeon(grid,cfg){
     if(Math.random()<cfg.lightChance) lightPanel(ox+i*C+C/2,fAt(i,j)+hFn(i,j)-.06,oz+j*C+C/2,C*.5,C*.5,Math.random()<.12);
   });
   if(weird>0) order.forEach(([i,j])=>{
-    if((i||j)&&Math.random()<weird*.1) addWeirdChair(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,Math.random()<.5?'ceiling':'sunk',fAt(i,j)+hFn(i,j));
+    if((i||j)&&Math.random()<weird*.1){
+      addWeirdChair(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,Math.random()<.5?'ceiling':'sunk',fAt(i,j)+hFn(i,j));
+      occupied.add(i+','+j);
+    }
   });
   if(cfg.clutterChance) order.forEach(([i,j])=>{
     if(!skipFloor(i,j)&&Math.random()<cfg.clutterChance){
       const kind=CLUTTER_KINDS[(Math.random()*CLUTTER_KINDS.length)|0];
       addClutterProp(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,fAt(i,j)+hFn(i,j),kind);
+      occupied.add(i+','+j);
     }
   });
   return {
@@ -1278,9 +1291,12 @@ function buildDungeon(grid,cfg){
     worldOf:(i,j)=>V3(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2),
     cellOf:(x,z)=>[ci(x),cj(z)],
     randomCells:(n,minDistFromEntry)=>{
-      const pool=order.filter(([i,j])=>!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry);
+      let pool=order.filter(([i,j])=>(!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry)&&!occupied.has(i+','+j));
+      if(pool.length<n) pool=order.filter(([i,j])=>!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry); // repli si trop peu de cellules libres restantes
       pool.sort(()=>Math.random()-.5);
-      return pool.slice(0,n);
+      const picked=pool.slice(0,n);
+      picked.forEach(([i,j])=>occupied.add(i+','+j));
+      return picked;
     },
   };
 }
@@ -2141,9 +2157,13 @@ function setupRandomMission(id,spots,names){
     if(cat.id==='documentation'){
       addPhotoTarget(p,label||'Anomalie détectée');
     } else {
+      // hauteur du sol réelle à cet endroit (et non un y fixe) : sur un niveau à relief (ex. Lobby,
+      // cellules surélevées), un anneau posé à une hauteur fixe pouvait se retrouver enterré sous le
+      // sol surélevé — invisible et donc impossible à repérer pour le joueur
+      const ringY=(terrainSample?terrainSample(p.x,p.z):0)+.03;
       const ring=new THREE.Mesh(new THREE.RingGeometry(.42,.57,22),
         new THREE.MeshBasicMaterial({color:0xffd24a,transparent:true,opacity:.5,side:THREE.DoubleSide}));
-      ring.rotation.x=-Math.PI/2; ring.position.set(p.x,.03,p.z); levelGroup.add(ring);
+      ring.rotation.x=-Math.PI/2; ring.position.set(p.x,ringY,p.z); levelGroup.add(ring);
       updaters.push(dt=>{ if(ring.visible) ring.material.opacity=.25+Math.sin(clock.elapsedTime*3)*.2; });
       const it=addInteract(p,cat.verb,()=>{
         if(!it.enabled)return;
@@ -2814,8 +2834,10 @@ const MP=(()=>{
   async function launchIntoLevel(levelId){
     if(!renderer){ auInit(); await load(); init(); }
     if(!IS_TOUCH) $('game').requestPointerLock&&$('game').requestPointerLock();
-    loadLevel(levelId);
-    setupMission(levelId);
+    loadLevel(levelId); // buildXxx() appelle déjà setupRandomMission avec le vrai nombre de points —
+    // un second appel à setupMission() ici écraserait cette mission par une version utilisant le
+    // total statique de LEVELS[id], qui ne correspond pas forcément aux points réellement générés
+    // et pouvait rendre la mission impossible à terminer (progress ne pouvait jamais atteindre total).
     updateHUD();
     ingameChatOn=false;
     $('mpIngameChat').classList.remove('on');
