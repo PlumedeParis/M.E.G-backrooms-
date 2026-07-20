@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v13</div>
+  <div id="verTag" class="px">v14</div>
 </div>
 
 <div id="mpOnline">
@@ -403,8 +403,6 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSAOShader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSAOPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="mp-config.js"></script>
 <script>
@@ -1012,23 +1010,13 @@ function setupPostFX(){
     if(!THREE.EffectComposer||!THREE.RenderPass||!THREE.UnrealBloomPass||!THREE.ShaderPass||!THREE.CopyShader) return;
     composer=new THREE.EffectComposer(renderer);
     composer.setSize(innerWidth,innerHeight);
-    // occlusion ambiante en espace écran (assombrit les recoins/jonctions mur-sol comme une vraie
-    // ombre de contact) — réservée au bureau (coût de rendu trop élevé sur mobile) et totalement
-    // optionnelle : si THREE.SSAOPass n'a pas pu charger ou si sa construction échoue pour
-    // n'importe quelle raison, on revient simplement à un rendu normal sans casser le reste du
-    // pipeline (bloom, grade, VHS restent actifs).
-    let firstPass=null;
-    if(!IS_TOUCH&&THREE.SSAOPass){
-      try{
-        ssaoPass=new THREE.SSAOPass(scene,camera,innerWidth,innerHeight);
-        ssaoPass.kernelRadius=8;
-        ssaoPass.minDistance=.0015;
-        ssaoPass.maxDistance=.06;
-        if(THREE.SSAOPass.OUTPUT&&typeof THREE.SSAOPass.OUTPUT.Default!=='undefined') ssaoPass.output=THREE.SSAOPass.OUTPUT.Default;
-        firstPass=ssaoPass;
-      }catch(e){ ssaoPass=null; }
-    }
-    composer.addPass(firstPass||new THREE.RenderPass(scene,camera));
+    // l'occlusion ambiante en espace écran (SSAO) a été retirée : elle pouvait construire sans
+    // erreur puis faire planter le rendu à l'exécution (écran noir en boucle, alors que le reste
+    // du jeu — HUD, logique — continuait de tourner normalement puisque le crash n'arrivait que
+    // dans l'appel de rendu, en toute fin de boucle). Pas moyen de le vérifier ni de le déboguer
+    // depuis cet environnement, donc plutôt que de retenter un réglage à l'aveugle, on l'enlève.
+    ssaoPass=null;
+    composer.addPass(new THREE.RenderPass(scene,camera));
     bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .5, .68, .18);
     bloomPass.threshold=.18; bloomPass.strength=.5; bloomPass.radius=.68;
     composer.addPass(bloomPass);
@@ -3490,7 +3478,15 @@ function animate(){
   // grain animé
   if(((t*10)|0)%2===0)$('grain').style.transform=`translate(${(t*97|0)%14}px,${(t*61|0)%14}px)`;
   updateHUD();
-  if(composer) composer.render(); else renderer.render(scene,camera);
+  // filet de sécurité : si le pipeline de post-traitement plante à l'exécution (pas seulement à
+  // sa construction), on ne veut surtout pas d'un écran noir permanent alors que tout le reste
+  // (HUD, logique de jeu) continue de tourner normalement puisque cet appel est le tout dernier
+  // de la boucle — on désactive le post-traitement et on repasse en rendu simple, une fois pour
+  // toutes, plutôt que de planter à chaque frame silencieusement.
+  if(composer){
+    try{ composer.render(); }
+    catch(e){ console.error('Rendu post-traitement en échec, retour au rendu simple :',e); composer=null; renderer.render(scene,camera); }
+  } else renderer.render(scene,camera);
 }
 
 /* ---------------- démarrage ---------------- */
