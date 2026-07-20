@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v10</div>
+  <div id="verTag" class="px">v11</div>
 </div>
 
 <div id="mpOnline">
@@ -3003,45 +3003,57 @@ const MP=(()=>{
   }
   function closeOnline(){ $('mpOnline').classList.remove('open'); $('title').style.display='flex'; }
 
+  // bascule un bouton en état "en cours" (texte + désactivé) pendant un appel réseau — sans ça,
+  // rien ne distingue "ça travaille encore" de "ça n'a rien fait", ce qui donne l'impression que
+  // le code de salon ne se génère pas du tout alors que la requête est simplement en vol
+  function withBusyBtn(id,busyLabel,fn){
+    const btn=$(id); const prev=btn?btn.textContent:null;
+    if(btn){ btn.disabled=true; btn.textContent=busyLabel; }
+    return fn().finally(()=>{ if(btn){ btn.disabled=false; btn.textContent=prev; } });
+  }
   async function createRoom(){
     if(busy) return; busy=true;
-    try{
-      await ensureAuth();
-      let lastErr=null;
-      for(let attempt=0;attempt<6;attempt++){
-        const id=uuid4(), code=genRoomCode();
-        const {data,error}=await sb.from('mp_rooms').insert(
-          {id,code,leader_id:uid,leader_pseudo:pseudo,level_id:'lobby',status:'lobby'}).select().single();
-        if(!error){
-          await sb.from('mp_room_members').insert({room_id:id,user_id:uid,pseudo,level:S.lv,ready:false});
-          await enterRoom(data.id);
-          return;
+    await withBusyBtn('mpCreateRoomBtn','Création…',async()=>{
+      try{
+        await ensureAuth();
+        let lastErr=null;
+        for(let attempt=0;attempt<6;attempt++){
+          const id=uuid4(), code=genRoomCode();
+          const {data,error}=await sb.from('mp_rooms').insert(
+            {id,code,leader_id:uid,leader_pseudo:pseudo,level_id:'lobby',status:'lobby'}).select().single();
+          if(!error){
+            await sb.from('mp_room_members').insert({room_id:id,user_id:uid,pseudo,level:S.lv,ready:false});
+            await enterRoom(data.id);
+            return;
+          }
+          lastErr=error;
+          if(error.code!=='23505') break; // pas une collision de code : inutile de réessayer
         }
-        lastErr=error;
-        if(error.code!=='23505') break; // pas une collision de code : inutile de réessayer
-      }
-      console.error(lastErr);
-      toast('Impossible de créer le salon — réessayez.');
-    }catch(e){ console.error(e); }
-    finally{ busy=false; }
+        console.error(lastErr);
+        toast('Impossible de créer le salon — réessayez.');
+      }catch(e){ console.error(e); toast('Connexion au serveur multijoueur impossible — réessayez.'); }
+    });
+    busy=false;
   }
   async function joinByCode(rawCode){
     const code=(rawCode||'').trim().toUpperCase();
     if(!code){ toast('Entrez un code de salon.'); return; }
     if(busy) return; busy=true;
-    try{
-      await ensureAuth();
-      const {data:r}=await sb.from('mp_rooms').select('*').eq('code',code).maybeSingle();
-      if(!r){ toast('Code de salon introuvable.'); return; }
-      if(r.status!=='lobby'){ toast('Ce salon a déjà démarré.'); return; }
-      const {data:already}=await sb.from('mp_room_members').select('user_id').eq('room_id',r.id).eq('user_id',uid).maybeSingle();
-      if(!already){
-        const {error}=await sb.from('mp_room_members').insert({room_id:r.id,user_id:uid,pseudo,level:S.lv,ready:false});
-        if(error){ toast('Salon complet ou introuvable.'); return; }
-      }
-      await enterRoom(r.id);
-    }catch(e){ console.error(e); toast('Connexion au salon impossible.'); }
-    finally{ busy=false; }
+    await withBusyBtn('mpJoinRoomBtn','Connexion…',async()=>{
+      try{
+        await ensureAuth();
+        const {data:r}=await sb.from('mp_rooms').select('*').eq('code',code).maybeSingle();
+        if(!r){ toast('Code de salon introuvable.'); return; }
+        if(r.status!=='lobby'){ toast('Ce salon a déjà démarré.'); return; }
+        const {data:already}=await sb.from('mp_room_members').select('user_id').eq('room_id',r.id).eq('user_id',uid).maybeSingle();
+        if(!already){
+          const {error}=await sb.from('mp_room_members').insert({room_id:r.id,user_id:uid,pseudo,level:S.lv,ready:false});
+          if(error){ toast('Salon complet ou introuvable.'); return; }
+        }
+        await enterRoom(r.id);
+      }catch(e){ console.error(e); toast('Connexion au salon impossible.'); }
+    });
+    busy=false;
   }
 
   async function enterRoom(roomId){
