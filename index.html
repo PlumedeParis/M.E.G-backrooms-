@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v17</div>
+  <div id="verTag" class="px">v18</div>
 </div>
 
 <div id="mpOnline">
@@ -430,6 +430,16 @@ function seededRandom(){
   return ((t^t>>>14)>>>0)/4294967296;
 }
 function RND(){ return _seedActive?seededRandom():Math.random(); }
+// dérive une graine 32 bits stable à partir d'une chaîne (ex. code de salon + niveau) — permet de
+// synchroniser la génération sans tirer/stocker de valeur séparée à propager entre joueurs.
+function hashSeed(str){
+  let h=1779033703^str.length;
+  for(let i=0;i<str.length;i++){
+    h=Math.imul(h^str.charCodeAt(i),3432918353); h=(h<<13)|(h>>>19);
+  }
+  h=Math.imul(h^(h>>>16),2246822507); h=Math.imul(h^(h>>>13),3266489909); h^=h>>>16;
+  return (h>>>0)||1;
+}
 const rand=(a,b)=>a+RND()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const V3=(x,y,z)=>new THREE.Vector3(x,y,z);
@@ -3223,23 +3233,8 @@ const MP=(()=>{
   }
   async function startGame(){
     if(!room||room.leader_id!==uid)return;
-    // graine partagée tirée par le chef : tous les coéquipiers généreront le même niveau
-    // (voir seedRng/RND — sans ça, chaque client tirait son propre labyrinthe au hasard)
-    const seed=Math.floor(Math.random()*2147483647)+1;
-    let {error}=await sb.from('mp_rooms').update({status:'starting',seed}).eq('id',room.id);
-    if(error){
-      console.error(error);
-      // repli : la colonne "seed" n'existe peut-être pas encore (migration SQL pas rejouée) — on
-      // retente sans elle plutôt que d'empêcher complètement le lancement de la partie. Avant ce
-      // correctif, cet appel échouait en silence et "Start Game" ne faisait strictement rien.
-      const retry=await sb.from('mp_rooms').update({status:'starting'}).eq('id',room.id);
-      if(retry.error){
-        console.error(retry.error);
-        toast('Impossible de lancer la partie — '+(retry.error.message||'réessayez')+'.');
-        return;
-      }
-      toast('Partie lancée sans carte synchronisée — exécutez supabase-schema.sql pour l\'activer.');
-    }
+    const {error}=await sb.from('mp_rooms').update({status:'starting'}).eq('id',room.id);
+    if(error){ console.error(error); toast('Impossible de lancer la partie — '+(error.message||'réessayez')+'.'); }
   }
   function beginLoadingSequence(){
     $('mpLoading').classList.add('on');
@@ -3253,11 +3248,14 @@ const MP=(()=>{
   async function launchIntoLevel(levelId){
     if(!renderer){ auInit(); await load(); init(); }
     if(!IS_TOUCH) $('game').requestPointerLock&&$('game').requestPointerLock();
-    // graine partagée par le chef d'équipe (voir startGame) : tant qu'elle est active, tous les
-    // tirages aléatoires de la génération de niveau (murs, bassins, décor, spawns...) passent par
-    // la même séquence déterministe sur chaque client, donc tout le monde obtient le même niveau.
+    // graine dérivée du code du salon + du niveau (pas d'aléatoire tiré ni de colonne à
+    // synchroniser) : le code est déjà identique pour toute l'équipe par construction, donc
+    // cette graine l'est aussi automatiquement, sans dépendre d'une migration SQL séparée qui
+    // pouvait ne pas avoir été rejouée. Tant qu'elle est active, tous les tirages aléatoires de
+    // la génération de niveau (murs, bassins, décor, spawns...) passent par la même séquence
+    // déterministe sur chaque client, donc tout le monde obtient exactement le même niveau.
     // Désactivée juste après pour que le reste du jeu (sons, scintillements...) reste imprévisible.
-    if(room&&room.seed){ seedRng(room.seed); _seedActive=true; }
+    if(room&&room.code){ seedRng(hashSeed(room.code+'|'+levelId)); _seedActive=true; }
     try{ loadLevel(levelId); } // buildXxx() appelle déjà setupRandomMission avec le vrai nombre de points —
     // un second appel à setupMission() ici écraserait cette mission par une version utilisant le
     // total statique de LEVELS[id], qui ne correspond pas forcément aux points réellement générés
