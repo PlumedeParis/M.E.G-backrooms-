@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v14</div>
+  <div id="verTag" class="px">v15</div>
 </div>
 
 <div id="mpOnline">
@@ -2976,7 +2976,14 @@ const MP=(()=>{
     uid=data.user.id; return uid;
   }
 
-  function init(){
+  // nommée initClient (pas "init") volontairement : un ancien nom "init" identique ici entrait en
+  // collision avec le init() global du moteur 3D (renderer/scene/camera/...) — comme les deux
+  // vivent dans des portées imbriquées, l'appel `init()` fait plus bas dans launchIntoLevel()
+  // résolvait silencieusement vers CETTE fonction-ci au lieu du vrai init() du jeu. Résultat : en
+  // lançant une partie en multijoueur sans être jamais passé par le menu solo, le moteur 3D
+  // (renderer, scène, caméra, barre d'objets, contrôles clavier/tactile) n'était jamais initialisé
+  // du tout — écran noir total, aucun bouton, aucun contrôle, exactement comme rapporté.
+  function initClient(){
     if(!configured||!window.supabase) return;
     // stockage de session scopé à l'onglet (sessionStorage) plutôt que localStorage :
     // localStorage est partagé entre tous les onglets d'un même navigateur, ce qui
@@ -3326,7 +3333,7 @@ const MP=(()=>{
     if(IS_TOUCH){ const b=$('btnChat'); if(b)b.addEventListener('touchstart',e=>{e.preventDefault();toggleIngameChat();},{passive:false}); }
   }
 
-  return { init,wireDom,tick,toggleIngameChat,
+  return { init:initClient,wireDom,tick,toggleIngameChat,
     get chatFocused(){ return chatFocused; },
     get inGame(){ return !!room; } };
 })();
