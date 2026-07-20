@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v12</div>
+  <div id="verTag" class="px">v13</div>
 </div>
 
 <div id="mpOnline">
@@ -307,6 +307,12 @@
       <input id="mpJoinCodeInput" maxlength="5" autocomplete="off" placeholder="CODE" style="text-transform:uppercase;letter-spacing:4px">
       <button class="mp-btn-sm" id="mpJoinRoomBtn">Rejoindre</button>
     </div>
+  </div>
+  <div class="mp-panel" style="margin-top:14px">
+    <h3>Ça ne fonctionne pas ?</h3>
+    <p style="font-size:11px;color:#9db496;margin-bottom:10px">Ce test vérifie chaque étape de la connexion au serveur multijoueur et indique précisément laquelle échoue, au lieu d'un simple "ça ne marche pas".</p>
+    <button class="mp-btn-sm" id="mpDiagBtn">Tester la connexion</button>
+    <div id="mpDiagLog" class="px" style="margin-top:10px;font-size:10px;line-height:1.9;white-space:pre-wrap;color:#cfe3c8;display:none;"></div>
   </div>
 </div>
 
@@ -3056,6 +3062,62 @@ const MP=(()=>{
     busy=false;
   }
 
+  // vérifie chaque étape de la chaîne de connexion une par une, avec le message d'erreur exact
+  // de Supabase à chaque échec — pour remplacer le "ça ne marche pas" par un diagnostic précis
+  // qu'on peut agir dessus, plutôt que de deviner à l'aveugle depuis ce sandbox de développement
+  // qui n'a lui-même aucun accès réseau vers Supabase pour reproduire quoi que ce soit.
+  async function runDiagnostic(){
+    const log=$('mpDiagLog'); const btn=$('mpDiagBtn');
+    if(!log)return;
+    log.style.display='block'; log.textContent='';
+    const line=s=>{ log.textContent+=s+'\n'; };
+    if(btn){ btn.disabled=true; btn.textContent='Test en cours…'; }
+    try{
+      line('1. Configuration (mp-config.js)… '+(configured?'OK':'ÉCHEC'));
+      if(!configured){ line('   → url/anonKey manquants ou toujours sur YOUR-PROJECT/YOUR-ANON-KEY.'); return; }
+      line('2. Bibliothèque Supabase chargée… '+(window.supabase?'OK':'ÉCHEC'));
+      if(!window.supabase){ line('   → le script @supabase/supabase-js n\'a pas pu charger (connexion coupée au moment du chargement de la page ?). Rechargez la page.'); return; }
+      line('3. Client Supabase créé… '+(sb?'OK':'ÉCHEC'));
+      if(!sb) return;
+      try{
+        await ensureAuth();
+        line('4. Connexion anonyme… OK');
+      }catch(e){
+        line('4. Connexion anonyme… ÉCHEC — '+(e&&e.message?e.message:e));
+        line('   → dans Supabase : Authentication > Providers > activez "Anonymous Sign-Ins".');
+        return;
+      }
+      try{
+        const {error}=await sb.from('mp_rooms').select('id').limit(1);
+        if(error) throw error;
+        line('5. Lecture de la table mp_rooms… OK');
+      }catch(e){
+        line('5. Lecture de la table mp_rooms… ÉCHEC — '+(e&&e.message?e.message:e));
+        line('   → dans Supabase : SQL Editor > exécutez tout le contenu de supabase-schema.sql.');
+        return;
+      }
+      const testId=uuid4(), testCode='ZTEST'+((Math.random()*9999)|0);
+      try{
+        const {error}=await sb.from('mp_rooms').insert(
+          {id:testId,code:testCode,leader_id:uid,leader_pseudo:'diag',level_id:'lobby',status:'ended'});
+        if(error) throw error;
+        line('6. Création d\'un salon test… OK');
+      }catch(e){
+        line('6. Création d\'un salon test… ÉCHEC — '+(e&&e.message?e.message:e));
+        line('   → vérifiez la colonne "code" (alter table mp_rooms add column ...) et les règles');
+        line('     de sécurité (RLS) "rooms insert own" sur mp_rooms, dans supabase-schema.sql.');
+        return;
+      }
+      const {error:delErr}=await sb.from('mp_rooms').delete().eq('id',testId);
+      line('7. Suppression du salon test… '+(delErr?('ÉCHEC (sans gravité) — '+delErr.message):'OK'));
+      line('');
+      line('Tout est en ordre : le multijoueur devrait fonctionner. Si "Créer un salon" échoue');
+      line('quand même malgré ce test réussi, dites-le précisément — c\'est un autre problème.');
+    } finally {
+      if(btn){ btn.disabled=false; btn.textContent='Tester la connexion'; }
+    }
+  }
+
   async function enterRoom(roomId){
     const {data:r,error}=await sb.from('mp_rooms').select('*').eq('id',roomId).single();
     if(!r){
@@ -3251,6 +3313,7 @@ const MP=(()=>{
     $('mpPseudoSave').onclick=()=>savePseudo($('mpPseudoInput').value);
     $('mpCreateRoomBtn').onclick=createRoom;
     $('mpJoinRoomBtn').onclick=()=>joinByCode($('mpJoinCodeInput').value);
+    const diagBtn=$('mpDiagBtn'); if(diagBtn) diagBtn.onclick=runDiagnostic;
     const joinInput=$('mpJoinCodeInput');
     if(joinInput) joinInput.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); joinByCode(joinInput.value); } });
     const copyBtn=$('mpCopyCodeBtn');
