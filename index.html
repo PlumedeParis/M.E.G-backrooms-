@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v9</div>
+  <div id="verTag" class="px">v10</div>
 </div>
 
 <div id="mpOnline">
@@ -383,6 +383,7 @@
   <h1 class="px" style="font-size:clamp(24px,5vw,40px)">Paramètres</h1>
   <div style="margin-top:26px;display:flex;flex-direction:column;gap:16px;align-items:center">
     <div class="setting-row">Volume <input type="range" id="volRange" min="0" max="100" value="70"></div>
+    <div class="setting-row">Sensibilité <input type="range" id="sensRange" min="20" max="250" value="100"></div>
     <button class="btn" id="muteBtn">Couper le son</button>
     <button class="btn" id="resetSaveBtn" style="color:#e05555;border-color:#e05555">Réinitialiser la progression</button>
   </div>
@@ -923,6 +924,7 @@ let currentLevel='hub';
 const player={yaw:0,pitch:0,pos:V3(0,1.65,0),speed:3.4,inWater:false,bob:0,stepT:0};
 const keys={};
 let flashOn=false, battery=100;
+let sensitivity=1; // multiplicateur réglable dans Paramètres, appliqué à la souris et au tactile
 let mission=null; // {level, targets:[], progress, total, verb, complete}
 
 function init(){
@@ -1164,8 +1166,10 @@ function mats(){
   MAT.ceil=new THREE.MeshStandardMaterial({map:TX.ceil,normalMap:TX.ceilN,normalScale:new THREE.Vector2(.35,.35),roughness:.95});
   MAT.conc=new THREE.MeshStandardMaterial({map:TX.conc,normalMap:TX.concN,normalScale:new THREE.Vector2(.7,.7),roughness:.95});
   MAT.concD=new THREE.MeshStandardMaterial({map:TX.concDark,normalMap:TX.concDN,normalScale:new THREE.Vector2(.7,.7),roughness:.98});
+  // blanc (comme la texture d'origine) : le carrelage reste mat (roughness .62, peu métallique)
+  // donc pas de retour à l'effet miroir éblouissant qui avait justifié un teintage plus sombre
   MAT.tile=new THREE.MeshStandardMaterial({map:TX.tile,normalMap:TX.tileN,normalScale:new THREE.Vector2(.4,.4),
-    roughness:.62,metalness:.02,color:0x6a7678});
+    roughness:.62,metalness:.02});
   MAT.metal=new THREE.MeshStandardMaterial({map:TX.metal,normalMap:TX.metalN,normalScale:new THREE.Vector2(.8,.8),roughness:.5,metalness:.7});
   MAT.hub=new THREE.MeshStandardMaterial({map:TX.hub,normalMap:TX.hubN,normalScale:new THREE.Vector2(.4,.4),roughness:.8});
   MAT.brick=new THREE.MeshStandardMaterial({map:TX.brick,normalMap:TX.brickN,normalScale:new THREE.Vector2(1,1),roughness:.95});
@@ -2650,8 +2654,8 @@ function bindInput(){
   cv.addEventListener('click',()=>{ if(!IS_TOUCH&&document.pointerLockElement!==cv) cv.requestPointerLock(); });
   addEventListener('mousemove',e=>{
     if(document.pointerLockElement===cv){
-      player.yaw-=e.movementX*.0022;
-      player.pitch=clamp(player.pitch-e.movementY*.0022,-1.45,1.45);
+      player.yaw-=e.movementX*.0022*sensitivity;
+      player.pitch=clamp(player.pitch-e.movementY*.0022*sensitivity,-1.45,1.45);
       // curseur virtuel : sous pointer lock, clientX/Y du navigateur reste figé au point de
       // verrouillage — sans ce suivi manuel par delta, cliquer sur la barre d'objets pendant
       // qu'on joue ne touche jamais le bon élément (le clic « ne fait rien »).
@@ -2700,8 +2704,8 @@ function bindInput(){
     lz.addEventListener('touchstart',e=>{const t=e.changedTouches[0];lid=t.identifier;lx=t.clientX;ly=t.clientY;},{passive:true});
     lz.addEventListener('touchmove',e=>{
       for(const t of e.changedTouches){ if(t.identifier===lid){
-        player.yaw-=(t.clientX-lx)*.0045;
-        player.pitch=clamp(player.pitch-(t.clientY-ly)*.0045,-1.45,1.45);
+        player.yaw-=(t.clientX-lx)*.0045*sensitivity;
+        player.pitch=clamp(player.pitch-(t.clientY-ly)*.0045*sensitivity,-1.45,1.45);
         lx=t.clientX; ly=t.clientY; } }
     },{passive:true});
     lz.addEventListener('touchend',e=>{for(const t of e.changedTouches)if(t.identifier===lid)lid=null;});
@@ -2909,6 +2913,7 @@ $('pauseResume').onclick=resumeGame;
 $('pauseSettings').onclick=()=>{
   $('pauseMenu').style.display='none'; $('settingsMenu').style.display='flex';
   $('volRange').value=AU.master?Math.round(AU.master.gain.value*100):70;
+  $('sensRange').value=Math.round(sensitivity*100);
 };
 $('settingsBack').onclick=()=>{ $('settingsMenu').style.display='none'; $('pauseMenu').style.display='flex'; };
 $('pauseAbandon').onclick=()=>{
@@ -2919,6 +2924,7 @@ $('pauseAbandon').onclick=()=>{
   startElevator('hub',true);
 };
 $('volRange').oninput=e=>{ if(AU.master) AU.master.gain.value=e.target.value/100; };
+$('sensRange').oninput=e=>{ sensitivity=e.target.value/100; };
 $('muteBtn').onclick=()=>{
   if(!AU.master)return;
   if(AU.master.gain.value>0){ AU.master._prevVol=AU.master.gain.value; AU.master.gain.value=0;
