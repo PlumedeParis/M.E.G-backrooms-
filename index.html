@@ -280,7 +280,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v6</div>
+  <div id="verTag" class="px">v7</div>
 </div>
 
 <div id="mpOnline">
@@ -394,6 +394,8 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSAOShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSAOPass.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="mp-config.js"></script>
 <script>
@@ -792,14 +794,30 @@ function init(){
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(innerWidth,innerHeight);
     if(composer){ composer.setSize(innerWidth,innerHeight);
-      if(bloomPass)bloomPass.setSize(innerWidth,innerHeight); }
+      if(bloomPass)bloomPass.setSize(innerWidth,innerHeight);
+      if(ssaoPass)ssaoPass.setSize(innerWidth,innerHeight); }
   });
   bindInput();
   buildHotbar();
   loadLevel('hub');
   animate();
 }
-let composer=null, bloomPass=null, vhsPass=null;
+let composer=null, bloomPass=null, vhsPass=null, ssaoPass=null;
+// grade couleur chaud (façon référence "backrooms" : ambre, noirs jamais totalement plats) —
+// passe volontairement minimaliste et sans dépendance externe, donc sans risque de chargement
+const GradeShader={
+  uniforms:{ tDiffuse:{value:null}, warmth:{value:.055}, lift:{value:.018} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    uniform sampler2D tDiffuse; uniform float warmth,lift;
+    varying vec2 vUv;
+    void main(){
+      vec3 col=texture2D(tDiffuse,vUv).rgb;
+      col+=vec3(warmth*.6,warmth*.22,-warmth*.55);
+      col=col*(1.0-lift)+lift*vec3(.09,.065,.03);
+      gl_FragColor=vec4(clamp(col,0.0,1.0),1.0);
+    }`
+};
 const VHSShader={
   uniforms:{ tDiffuse:{value:null}, time:{value:0}, aberration:{value:.0028},
     scanline:{value:.22}, noise:{value:.07}, glitch:{value:.35}, roll:{value:0} },
@@ -828,21 +846,39 @@ const VHSShader={
     }`
 };
 function setupPostFX(){
-  // pipeline de post-traitement (bloom cinématique + VHS found-footage) — repli silencieux si les modules CDN sont indisponibles
+  // pipeline de post-traitement (bloom cinématique + grade couleur + VHS found-footage) —
+  // repli silencieux si les modules CDN sont indisponibles
   try{
     if(!THREE.EffectComposer||!THREE.RenderPass||!THREE.UnrealBloomPass||!THREE.ShaderPass||!THREE.CopyShader) return;
     composer=new THREE.EffectComposer(renderer);
     composer.setSize(innerWidth,innerHeight);
-    composer.addPass(new THREE.RenderPass(scene,camera));
+    // occlusion ambiante en espace écran (assombrit les recoins/jonctions mur-sol comme une vraie
+    // ombre de contact) — réservée au bureau (coût de rendu trop élevé sur mobile) et totalement
+    // optionnelle : si THREE.SSAOPass n'a pas pu charger ou si sa construction échoue pour
+    // n'importe quelle raison, on revient simplement à un rendu normal sans casser le reste du
+    // pipeline (bloom, grade, VHS restent actifs).
+    let firstPass=null;
+    if(!IS_TOUCH&&THREE.SSAOPass){
+      try{
+        ssaoPass=new THREE.SSAOPass(scene,camera,innerWidth,innerHeight);
+        ssaoPass.kernelRadius=8;
+        ssaoPass.minDistance=.0015;
+        ssaoPass.maxDistance=.06;
+        if(THREE.SSAOPass.OUTPUT&&typeof THREE.SSAOPass.OUTPUT.Default!=='undefined') ssaoPass.output=THREE.SSAOPass.OUTPUT.Default;
+        firstPass=ssaoPass;
+      }catch(e){ ssaoPass=null; }
+    }
+    composer.addPass(firstPass||new THREE.RenderPass(scene,camera));
     bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), .5, .68, .18);
     bloomPass.threshold=.18; bloomPass.strength=.5; bloomPass.radius=.68;
     composer.addPass(bloomPass);
+    composer.addPass(new THREE.ShaderPass(GradeShader));
     vhsPass=new THREE.ShaderPass(VHSShader);
     vhsPass.enabled=false;
     composer.addPass(vhsPass);
     const copy=new THREE.ShaderPass(THREE.CopyShader); copy.renderToScreen=true;
     composer.addPass(copy);
-  }catch(e){ composer=null; bloomPass=null; vhsPass=null; }
+  }catch(e){ composer=null; bloomPass=null; vhsPass=null; ssaoPass=null; }
 }
 
 function buildFlashlight(){
@@ -1011,7 +1047,13 @@ function box(w,h,d,mat,x,y,z,o){
 function lightPanel(x,y,z,w,d,flicker){
   const p=new THREE.Mesh(new THREE.PlaneGeometry(w||2,d||1),MAT.lightPanel);
   p.rotation.x=Math.PI/2; p.position.set(x,y,z); levelGroup.add(p);
-  if(flicker){ updaters.push(dt=>{ p.visible=Math.random()>.06?true:false; }); }
+  // une partie des plafonniers projette une vraie pool de lumière chaude au sol (pas tous, pour
+  // le coût de rendu et pour varier naturellement) — sans ça, ces panneaux n'étaient qu'un décor
+  // toujours plein-blanc qui n'éclairait jamais réellement la pièce en dessous
+  if(Math.random()<(IS_TOUCH?.35:.55)){
+    const glow=pointLight(x,y-.55,z,0xffe9c2,1.15,Math.max(w||2,d||1)*2.8);
+    if(flicker) updaters.push(dt=>{ const on=Math.random()>.06; p.visible=on; glow.intensity=on?1.15:0; });
+  } else if(flicker){ updaters.push(dt=>{ p.visible=Math.random()>.06?true:false; }); }
   return p;
 }
 function pointLight(x,y,z,color,intensity,dist){
