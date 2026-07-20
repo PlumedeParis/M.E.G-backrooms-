@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v11</div>
+  <div id="verTag" class="px">v12</div>
 </div>
 
 <div id="mpOnline">
@@ -3057,12 +3057,18 @@ const MP=(()=>{
   }
 
   async function enterRoom(roomId){
-    const {data:r}=await sb.from('mp_rooms').select('*').eq('id',roomId).single();
-    if(!r) return;
+    const {data:r,error}=await sb.from('mp_rooms').select('*').eq('id',roomId).single();
+    if(!r){
+      // point d'échec resté silencieux jusqu'ici : le salon venait pourtant d'être créé/rejoint
+      // avec succès juste avant — si cette relecture échoue (policy RLS sur select, réseau...),
+      // on se retrouvait renvoyé sans aucun message, comme si le clic n'avait rien fait.
+      console.error(error); toast('Salon introuvable après connexion — réessayez.'); return;
+    }
     room=r;
     subscribeRoomDb(roomId);
     joinRoomChannel(roomId);
     await refreshMembers();
+    if(!room) return; // refreshMembers a pu détecter qu'on n'est plus membre et déjà nous en sortir
     $('mpOnline').classList.remove('open');
     $('mpLobby').classList.add('open');
     renderLobby();
@@ -3080,9 +3086,13 @@ const MP=(()=>{
   }
   async function refreshMembers(){
     if(!room)return;
-    const {data}=await sb.from('mp_room_members').select('*').eq('room_id',room.id).order('joined_at');
+    const {data,error}=await sb.from('mp_room_members').select('*').eq('room_id',room.id).order('joined_at');
     members=data||[];
-    if(!members.some(m=>m.user_id===uid)){ leaveLobbyUI(); return; }
+    if(!members.some(m=>m.user_id===uid)){
+      console.error(error);
+      toast('Connexion au salon perdue (accès refusé ou salon introuvable) — réessayez.');
+      leaveLobbyUI(); return;
+    }
     renderLobby();
   }
   function joinRoomChannel(roomId){
