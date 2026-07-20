@@ -96,6 +96,7 @@
   #toast{position:absolute;left:50%;top:22%;transform:translateX(-50%);font-size:12px;color:#e8c15a;
     opacity:0;transition:opacity .4s;text-align:center;}
   #credhud{position:absolute;top:14px;left:16px;font-size:11px;color:#e8c15a;}
+  #fpsHud{position:absolute;top:34px;left:16px;font-size:9px;color:#6f8f6f;letter-spacing:1px;}
   #missionTimer{position:absolute;left:50%;top:14px;transform:translateX(-50%);font-size:14px;color:#e8c15a;display:none;
     letter-spacing:2px;text-shadow:0 0 6px rgba(0,0,0,.8);}
   #missionTimer.on{display:block;}
@@ -240,6 +241,7 @@
 
 <div id="hud">
   <div id="credhud" class="px"></div>
+  <div id="fpsHud" class="px"></div>
   <div id="objectives" class="px"></div>
   <div id="crosshair"></div>
   <div id="prompt" class="px"></div>
@@ -280,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v8</div>
+  <div id="verTag" class="px">v9</div>
 </div>
 
 <div id="mpOnline">
@@ -916,6 +918,7 @@ let elevatorPos=null, missionTimer=0, missionTimerActive=false, compassOn=false,
 let levelGrid=null, levelDungeon=null, compassMarkers=[], compassRecalcT=0;
 let hostileSprites=[];
 let camShake=0, heartbeatT=0;
+let fpsAcc=0, fpsFrames=0, fpsT=0; // moyenne glissante affichée dans le HUD
 let currentLevel='hub';
 const player={yaw:0,pitch:0,pos:V3(0,1.65,0),speed:3.4,inWater:false,bob:0,stepT:0};
 const keys={};
@@ -1614,8 +1617,8 @@ function buildLobby(){
 function buildPool(){
   scene.fog=new THREE.FogExp2(0x2e3638,.045);
   renderer.setClearColor(0x2e3638);
-  scene.add(new THREE.AmbientLight(0xd6e0e2,.07));
-  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.05));
+  scene.add(new THREE.AmbientLight(0xd6e0e2,.13));
+  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.11));
   const NX=16,NZ=12,C=7,H=5.4,H2=9.2,ox=-NX*C/2,oz=-NZ*C/2;
   // bande à plafond haut (atrium) — position aléatoire à chaque génération
   const atriumI0=3+((Math.random()*(NX-8))|0), atriumW=3+((Math.random()*3)|0);
@@ -1641,7 +1644,7 @@ function buildPool(){
   for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++) if(inFlood(i-1,j)&&inFlood(i,j)) grid.vw[i][j]=false;
   for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++) if(inFlood(i,j-1)&&inFlood(i,j)) grid.hw[i][j]=false;
   const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
-    pillarChance:.05,lightChance:.18,weirdChance:.2,skipFloor:inFlood,clutterChance:.1});
+    pillarChance:.05,lightChance:.26,weirdChance:.2,skipFloor:inFlood,clutterChance:.1});
   levelGrid=grid; levelDungeon=dungeon;
   const poolDepth=1.3, waterY=-poolDepth+.45;
   // le sol suit le relief normal partout, sauf dans un bassin où il descend en douceur
@@ -3261,9 +3264,13 @@ function collides(x,z){
 }
 function animate(){
   requestAnimationFrame(animate);
-  const rawDt=Math.min(clock.getDelta(),.05);
+  const frameDt=clock.getDelta();
+  const rawDt=Math.min(frameDt,.05);
   const dt=paused?0:rawDt;
   const t=clock.elapsedTime;
+  // compteur FPS — moyenné sur ~0.5s pour rester lisible plutôt que de sauter à chaque frame
+  fpsAcc+=frameDt>0?1/frameDt:0; fpsFrames++; fpsT+=frameDt;
+  if(fpsT>.5){ $('fpsHud').textContent=Math.round(fpsAcc/fpsFrames)+' FPS'; fpsAcc=0; fpsFrames=0; fpsT=0; }
   // mouvement
   const termOpen=$('terminal').style.display==='flex';
   let mx=0,mz=0;
@@ -3298,11 +3305,17 @@ function animate(){
     const gy=terrainSample(player.pos.x,player.pos.z)+1.65;
     player.pos.y+=(gy-player.pos.y)*Math.min(1,dt*6);
   }
-  camera.position.set(player.pos.x,
-    player.pos.y+Math.sin(player.bob)*.035*(len>0?1:0),
-    player.pos.z);
+  // balancement de la marche : tangage vertical (double fréquence, un pic par pas) + léger
+  // roulis horizontal orienté selon le regard, pour que ça se sente vraiment en marchant
+  const walking=len>0?1:0;
+  const bobY=Math.sin(player.bob*2)*.045*walking;
+  const bobX=Math.sin(player.bob)*.028*walking;
+  camera.position.set(player.pos.x+Math.cos(player.yaw)*bobX,
+    player.pos.y+bobY,
+    player.pos.z-Math.sin(player.yaw)*bobX);
   camera.rotation.order='YXZ';
   camera.rotation.y=player.yaw; camera.rotation.x=player.pitch;
+  camera.rotation.z=Math.sin(player.bob)*.012*walking;
   // secousse de caméra à l'impact
   if(camShake>0){
     camera.position.x+=rand(-1,1)*camShake*.06;
