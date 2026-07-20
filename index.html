@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v16</div>
+  <div id="verTag" class="px">v17</div>
 </div>
 
 <div id="mpOnline">
@@ -329,9 +329,10 @@
       <div class="mp-list" id="mpMemberList"></div>
       <h3 style="margin-top:16px">Niveau / Mission</h3>
       <div class="mp-levels" id="mpLevelPicker"></div>
-      <div style="margin-top:auto;display:flex;gap:10px;align-items:center;padding-top:10px">
+      <div style="margin-top:auto;display:flex;gap:10px;align-items:center;padding-top:10px;flex-wrap:wrap">
         <button class="mp-btn-sm" id="mpReadyBtn">Prêt</button>
         <button class="btn green" id="mpStartBtn" style="display:none;padding:8px 20px;font-size:11px">▸ Start Game</button>
+        <span id="mpStartHint" style="font-size:10px;color:#9db496;display:none;width:100%"></span>
       </div>
     </div>
     <div class="mp-panel mp-chat">
@@ -2980,7 +2981,8 @@ const MP=(()=>{
   function savePseudo(p){
     p=(p||'').trim().slice(0,16); if(!p)return;
     pseudo=p; localStorage.setItem('meg-pseudo',p);
-    if(room) sb.from('mp_room_members').update({pseudo}).eq('room_id',room.id).eq('user_id',uid).then(()=>{});
+    if(room) sb.from('mp_room_members').update({pseudo}).eq('room_id',room.id).eq('user_id',uid)
+      .then(({error})=>{ if(error) console.error(error); });
   }
   async function ensureAuth(){
     if(uid) return uid;
@@ -3195,7 +3197,8 @@ const MP=(()=>{
       b.className='mp-lvl-opt'+(room.level_id===id?' sel':'');
       b.textContent=LEVELS[id].name.replace(/^LEVEL \d+ — /,'');
       b.disabled=!isLeader;
-      b.onclick=()=>{ if(isLeader) sb.from('mp_rooms').update({level_id:id}).eq('id',room.id).then(()=>{}); };
+      b.onclick=()=>{ if(!isLeader)return; sb.from('mp_rooms').update({level_id:id}).eq('id',room.id)
+        .then(({error})=>{ if(error){ console.error(error); toast('Impossible de sélectionner ce niveau — réessayez.'); } }); };
       picker.appendChild(b);
     });
     const me=members.find(m=>m.user_id===uid);
@@ -3204,17 +3207,39 @@ const MP=(()=>{
     const allReady=members.length>0&&members.every(m=>m.ready);
     $('mpStartBtn').style.display=isLeader?'inline-block':'none';
     $('mpStartBtn').disabled=!(allReady&&room.level_id);
+    // le bouton grisé sans aucune explication laisse penser que "Start Game" ne fait rien —
+    // ce message dit explicitement ce qui manque
+    const hint=$('mpStartHint');
+    if(hint&&isLeader){
+      if(!room.level_id){ hint.textContent='Choisissez un niveau ci-dessus avant de lancer la partie.'; hint.style.display='block'; }
+      else if(!allReady){ hint.textContent='En attente que tous les coéquipiers soient prêts.'; hint.style.display='block'; }
+      else hint.style.display='none';
+    } else if(hint) hint.style.display='none';
   }
   function toggleReady(){
     const me=members.find(m=>m.user_id===uid); if(!me||!room)return;
-    sb.from('mp_room_members').update({ready:!me.ready}).eq('room_id',room.id).eq('user_id',uid).then(()=>{});
+    sb.from('mp_room_members').update({ready:!me.ready}).eq('room_id',room.id).eq('user_id',uid)
+      .then(({error})=>{ if(error){ console.error(error); toast('Impossible de changer de statut — réessayez.'); } });
   }
   async function startGame(){
     if(!room||room.leader_id!==uid)return;
     // graine partagée tirée par le chef : tous les coéquipiers généreront le même niveau
     // (voir seedRng/RND — sans ça, chaque client tirait son propre labyrinthe au hasard)
     const seed=Math.floor(Math.random()*2147483647)+1;
-    await sb.from('mp_rooms').update({status:'starting',seed}).eq('id',room.id);
+    let {error}=await sb.from('mp_rooms').update({status:'starting',seed}).eq('id',room.id);
+    if(error){
+      console.error(error);
+      // repli : la colonne "seed" n'existe peut-être pas encore (migration SQL pas rejouée) — on
+      // retente sans elle plutôt que d'empêcher complètement le lancement de la partie. Avant ce
+      // correctif, cet appel échouait en silence et "Start Game" ne faisait strictement rien.
+      const retry=await sb.from('mp_rooms').update({status:'starting'}).eq('id',room.id);
+      if(retry.error){
+        console.error(retry.error);
+        toast('Impossible de lancer la partie — '+(retry.error.message||'réessayez')+'.');
+        return;
+      }
+      toast('Partie lancée sans carte synchronisée — exécutez supabase-schema.sql pour l\'activer.');
+    }
   }
   function beginLoadingSequence(){
     $('mpLoading').classList.add('on');
@@ -3253,8 +3278,10 @@ const MP=(()=>{
   }
   async function leaveRoom(){
     if(!room)return;
-    if(room.leader_id===uid) await sb.from('mp_rooms').delete().eq('id',room.id);
-    else await sb.from('mp_room_members').delete().eq('room_id',room.id).eq('user_id',uid);
+    const {error}=room.leader_id===uid
+      ? await sb.from('mp_rooms').delete().eq('id',room.id)
+      : await sb.from('mp_room_members').delete().eq('room_id',room.id).eq('user_id',uid);
+    if(error) console.error(error); // on quitte quand même localement, sans bloquer sur cette erreur
     leaveLobbyUI();
   }
 
