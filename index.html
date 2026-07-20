@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v15</div>
+  <div id="verTag" class="px">v16</div>
 </div>
 
 <div id="mpOnline">
@@ -414,7 +414,22 @@
 
 /* ---------------- utilitaires ---------------- */
 const $=id=>document.getElementById(id);
-const rand=(a,b)=>a+Math.random()*(b-a);
+// générateur pseudo-aléatoire "graine partagée" (mulberry32) : utilisé UNIQUEMENT pendant la
+// génération d'un niveau en multijoueur, pour que tous les coéquipiers obtiennent EXACTEMENT le
+// même labyrinthe (murs, piscines, décor, points de mission, zones de spawn des monstres...) —
+// sans ça, chaque client tirait son propre labyrinthe au hasard et un mur pour l'un n'existait
+// pas pour l'autre. RND() se comporte comme Math.random() dans tous les autres cas (solo, sons,
+// scintillements, textures...), donc rien ne change en dehors de cette fenêtre de génération.
+let _rngState=0, _seedActive=false;
+function seedRng(seed){ _rngState=(seed>>>0)||1; }
+function seededRandom(){
+  _rngState|=0; _rngState=_rngState+0x6D2B79F5|0;
+  let t=Math.imul(_rngState^_rngState>>>15,1|_rngState);
+  t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296;
+}
+function RND(){ return _seedActive?seededRandom():Math.random(); }
+const rand=(a,b)=>a+RND()*(b-a);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const V3=(x,y,z)=>new THREE.Vector3(x,y,z);
 const IS_TOUCH='ontouchstart' in window;
@@ -451,7 +466,7 @@ function auInit(){
 }
 function noiseBuf(){
   const c=AU.ctx, b=c.createBuffer(1,c.sampleRate*2,c.sampleRate), d=b.getChannelData(0);
-  for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; return b;
+  for(let i=0;i<d.length;i++) d[i]=RND()*2-1; return b;
 }
 function stopAmb(){ AU.amb.forEach(n=>{try{n.stop?n.stop():n.disconnect()}catch(e){}}); AU.amb=[]; }
 function ambience(cfg){
@@ -516,7 +531,7 @@ function footstep(surface){
     s.start(); s.stop(t0+.18); return;
   }
   // dur / carrelage / béton (par défaut)
-  f.type='bandpass'; f.frequency.value=900+Math.random()*300; f.Q.value=1.2;
+  f.type='bandpass'; f.frequency.value=900+RND()*300; f.Q.value=1.2;
   g.gain.setValueAtTime(.09,t0); g.gain.exponentialRampToValueAtTime(.001,t0+.12);
   s.start(); s.stop(t0+.35);
 }
@@ -557,16 +572,16 @@ function bumpToNormal(srcTex,strength){
 }
 function grime(ctx,w,h,n,alpha,dark){
   for(let i=0;i<n;i++){
-    const x=Math.random()*w,y=Math.random()*h,r=rand(4,40);
+    const x=RND()*w,y=RND()*h,r=rand(4,40);
     const g=ctx.createRadialGradient(x,y,0,x,y,r);
-    g.addColorStop(0,`rgba(${dark?'20,16,8':'255,255,255'},${alpha*Math.random()})`);
+    g.addColorStop(0,`rgba(${dark?'20,16,8':'255,255,255'},${alpha*RND()})`);
     g.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=g; ctx.fillRect(x-r,y-r,r*2,r*2);
   }
 }
 function speckle(ctx,w,h,n,a){
-  for(let i=0;i<n;i++){ ctx.fillStyle=`rgba(0,0,0,${Math.random()*a})`;
-    ctx.fillRect(Math.random()*w,Math.random()*h,1.4,1.4); }
+  for(let i=0;i<n;i++){ ctx.fillStyle=`rgba(0,0,0,${RND()*a})`;
+    ctx.fillRect(RND()*w,RND()*h,1.4,1.4); }
 }
 // assombrit légèrement les coins d'une texture (occlusion de coin simulée) — casse l'aplat des
 // tuiles qui se répètent en donnant un léger relief perçu à chaque répétition
@@ -593,7 +608,7 @@ function buildTextures(){
   TX.wall=tex(512,512,(c,w,h)=>{
     c.fillStyle='#b3a24c'; c.fillRect(0,0,w,h);
     blotchTone(c,w,h,10,[179,162,76],14);
-    for(let x=0;x<w;x+=14){ c.fillStyle=`rgba(0,0,0,${.028+Math.random()*.02})`; c.fillRect(x,0,6,h); }
+    for(let x=0;x<w;x+=14){ c.fillStyle=`rgba(0,0,0,${.028+RND()*.02})`; c.fillRect(x,0,6,h); }
     speckle(c,w,h,2600,.12); speckle(c,w,h,900,.05); grime(c,w,h,26,.06,true);
     // cimaise discrète à mi-hauteur, avec ses propres coulures verticales
     c.fillStyle='rgba(60,50,18,.3)'; c.fillRect(0,h*.32,w,3);
@@ -610,10 +625,10 @@ function buildTextures(){
     c.fillStyle='#8b7d3c'; c.fillRect(0,0,w,h);
     blotchTone(c,w,h,8,[139,125,60],16);
     for(let i=0;i<9000;i++){ c.fillStyle=`rgba(${rand(90,150)|0},${rand(80,130)|0},${rand(30,60)|0},.5)`;
-      c.fillRect(Math.random()*w,Math.random()*h,2,2); }
+      c.fillRect(RND()*w,RND()*h,2,2); }
     // fibres plus fines par-dessus, densité différente pour casser la régularité
     for(let i=0;i<5000;i++){ c.fillStyle=`rgba(${rand(60,110)|0},${rand(50,95)|0},${rand(20,45)|0},.35)`;
-      c.fillRect(Math.random()*w,Math.random()*h,1,1); }
+      c.fillRect(RND()*w,RND()*h,1,1); }
     grime(c,w,h,30,.09,true);
     // taches d'usure plus marquées, ponctuelles
     for(let i=0;i<4;i++) grime(c,w,h,1,rand(.12,.22),true);
@@ -638,7 +653,7 @@ function buildTextures(){
       c.beginPath();c.moveTo(0,i*h/4+2);c.lineTo(w,i*h/4+2);c.stroke(); }
     grime(c,w,h,14,.08,true);
     // une ou deux auréoles d'humidité (dalle tachée)
-    if(Math.random()<.7) grime(c,w,h,1,rand(.15,.25),true);
+    if(RND()<.7) grime(c,w,h,1,rand(.15,.25),true);
     vignette(c,w,h,.12);
   },6,6);
   // béton
@@ -651,7 +666,7 @@ function buildTextures(){
       let x=rand(0,w),y=rand(0,h);
       c.strokeStyle=`rgba(0,0,0,${rand(.15,.3)})`; c.lineWidth=rand(.5,1.2);
       c.beginPath(); c.moveTo(x,y);
-      for(let s=0;s<(3+Math.random()*4)|0;s++){ x+=rand(-40,40); y+=rand(-40,40); c.lineTo(x,y); }
+      for(let s=0;s<(3+RND()*4)|0;s++){ x+=rand(-40,40); y+=rand(-40,40); c.lineTo(x,y); }
       c.stroke();
     }
     c.strokeStyle='rgba(0,0,0,.25)'; c.lineWidth=2;
@@ -666,7 +681,7 @@ function buildTextures(){
       let x=rand(0,w),y=rand(0,h);
       c.strokeStyle=`rgba(0,0,0,${rand(.2,.35)})`; c.lineWidth=rand(.5,1.2);
       c.beginPath(); c.moveTo(x,y);
-      for(let s=0;s<(3+Math.random()*4)|0;s++){ x+=rand(-40,40); y+=rand(-40,40); c.lineTo(x,y); }
+      for(let s=0;s<(3+RND()*4)|0;s++){ x+=rand(-40,40); y+=rand(-40,40); c.lineTo(x,y); }
       c.stroke();
     }
     vignette(c,w,h,.16);
@@ -681,7 +696,7 @@ function buildTextures(){
       const t=rand(-6,6);
       c.fillStyle=`rgba(${233+t|0},${237+t|0},${238+t|0},.6)`;
       c.fillRect(x+2,y+2,s-4,s-4);
-      if(Math.random()<.05){ c.fillStyle=`rgba(150,165,150,${rand(.08,.18)})`; c.fillRect(x+3,y+3,s-6,s-6); }
+      if(RND()<.05){ c.fillStyle=`rgba(150,165,150,${rand(.08,.18)})`; c.fillRect(x+3,y+3,s-6,s-6); }
     }
     // joint en creux : trait clair puis trait sombre juste à côté (impression de profondeur)
     c.lineWidth=4;
@@ -722,8 +737,8 @@ function buildTextures(){
   TX.ice=tex(512,512,(c,w,h)=>{
     c.fillStyle='#c9e4ee'; c.fillRect(0,0,w,h);
     blotchTone(c,w,h,10,[210,235,245],10);
-    for(let i=0;i<1800;i++){ c.fillStyle=`rgba(255,255,255,${Math.random()*.5})`;
-      c.fillRect(Math.random()*w,Math.random()*h,rand(1,3),rand(1,3)); }
+    for(let i=0;i<1800;i++){ c.fillStyle=`rgba(255,255,255,${RND()*.5})`;
+      c.fillRect(RND()*w,RND()*h,rand(1,3),rand(1,3)); }
     // plaques de givre plus larges, en surimpression douce
     for(let i=0;i<16;i++){
       const x=rand(0,w),y=rand(0,h),r=rand(20,55);
@@ -734,9 +749,9 @@ function buildTextures(){
     // craquelures de glace
     c.strokeStyle='rgba(140,190,210,.4)';
     for(let i=0;i<26;i++){
-      let x=Math.random()*w,y=Math.random()*h;
+      let x=RND()*w,y=RND()*h;
       c.lineWidth=rand(.6,1.6); c.beginPath(); c.moveTo(x,y);
-      const branches=(2+Math.random()*3)|0;
+      const branches=(2+RND()*3)|0;
       for(let b=0;b<branches;b++){ x+=rand(-60,60); y+=rand(-60,60); c.lineTo(x,y); }
       c.stroke();
     }
@@ -746,10 +761,10 @@ function buildTextures(){
   // métal
   TX.metal=tex(512,512,(c,w,h)=>{
     c.fillStyle='#4c4f55'; c.fillRect(0,0,w,h);
-    for(let y=0;y<h;y+=2){ c.fillStyle=`rgba(255,255,255,${Math.random()*.05})`; c.fillRect(0,y,w,1); }
+    for(let y=0;y<h;y+=2){ c.fillStyle=`rgba(255,255,255,${RND()*.05})`; c.fillRect(0,y,w,1); }
     // stries brossées verticales, plus longues et discrètes
     for(let i=0;i<180;i++){ const x=rand(0,w);
-      c.strokeStyle=`rgba(${Math.random()<.5?'0,0,0':'255,255,255'},${rand(.02,.06)})`;
+      c.strokeStyle=`rgba(${RND()<.5?'0,0,0':'255,255,255'},${rand(.02,.06)})`;
       c.lineWidth=1; c.beginPath(); c.moveTo(x,0); c.lineTo(x+rand(-6,6),h); c.stroke();
     }
     // rivets discrets aux jonctions
@@ -820,7 +835,7 @@ function buildTextures(){
     const bw=64,bh=28;
     for(let y=0,r=0;y<h;y+=bh,r++){
       for(let x=-(r%2)*bw/2;x<w;x+=bw){
-        const chipped=Math.random()<.06;
+        const chipped=RND()<.06;
         c.fillStyle=`rgb(${rand(95,130)-(chipped?25:0)|0},${rand(55,75)-(chipped?12:0)|0},${rand(40,55)-(chipped?8:0)|0})`;
         c.fillRect(x+2,y+2,bw-4,bh-4);
       }
@@ -856,7 +871,7 @@ function buildTextures(){
       sg.addColorStop(0,'rgba(255,235,200,.05)'); sg.addColorStop(.5,'rgba(255,235,200,0)'); sg.addColorStop(1,'rgba(0,0,0,.05)');
       c.fillStyle=sg; c.fillRect(0,y,w,plankH);
       // nœuds occasionnels
-      if(Math.random()<.6){
+      if(RND()<.6){
         const kx=rand(20,w-20), ky=y+plankH/2+rand(-8,8), kr=rand(4,9);
         const g=c.createRadialGradient(kx,ky,0,kx,ky,kr);
         g.addColorStop(0,'rgba(30,18,8,.75)'); g.addColorStop(.6,'rgba(40,24,10,.4)'); g.addColorStop(1,'rgba(40,24,10,0)');
@@ -872,7 +887,7 @@ function buildTextures(){
   TX.waterN=tex(256,256,(c,w,h)=>{
     const img=c.createImageData(w,h);
     for(let i=0;i<img.data.length;i+=4){
-      img.data[i]=120+Math.random()*40; img.data[i+1]=120+Math.random()*40;
+      img.data[i]=120+RND()*40; img.data[i+1]=120+RND()*40;
       img.data[i+2]=230; img.data[i+3]=255;
     }
     c.putImageData(img,0,0);
@@ -892,8 +907,8 @@ function buildTextures(){
   // grain CSS
   const g=document.createElement('canvas'); g.width=g.height=128;
   const gc=g.getContext('2d');
-  for(let i=0;i<7000;i++){gc.fillStyle=`rgba(255,255,255,${Math.random()*.5})`;
-    gc.fillRect(Math.random()*128,Math.random()*128,1,1);}
+  for(let i=0;i<7000;i++){gc.fillStyle=`rgba(255,255,255,${RND()*.5})`;
+    gc.fillRect(RND()*128,RND()*128,1,1);}
   $('grain').style.background=`url(${g.toDataURL()})`;
   // normal maps dérivées (relief de surface) pour les matériaux principaux
   TX.wallN=bumpToNormal(TX.wall,2.4);
@@ -1082,7 +1097,7 @@ function dropFlare(){
   updaters.push(dt=>{
     if(done)return;
     life-=dt;
-    glow.intensity=(life>4?3.2:3.2*(life/4))*(.85+Math.random()*.3);
+    glow.intensity=(life>4?3.2:3.2*(life/4))*(.85+RND()*.3);
     if(life<=0){ levelGroup.remove(g); done=true; }
   });
 }
@@ -1200,10 +1215,10 @@ function lightPanel(x,y,z,w,d,flicker){
   // une partie des plafonniers projette une vraie pool de lumière chaude au sol (pas tous, pour
   // le coût de rendu et pour varier naturellement) — sans ça, ces panneaux n'étaient qu'un décor
   // toujours plein-blanc qui n'éclairait jamais réellement la pièce en dessous
-  if(Math.random()<(IS_TOUCH?.35:.55)){
+  if(RND()<(IS_TOUCH?.35:.55)){
     const glow=pointLight(x,y-.55,z,0xffe9c2,1.15,Math.max(w||2,d||1)*2.8);
-    if(flicker) updaters.push(dt=>{ const on=Math.random()>.06; p.visible=on; glow.intensity=on?1.15:0; });
-  } else if(flicker){ updaters.push(dt=>{ p.visible=Math.random()>.06?true:false; }); }
+    if(flicker) updaters.push(dt=>{ const on=RND()>.06; p.visible=on; glow.intensity=on?1.15:0; });
+  } else if(flicker){ updaters.push(dt=>{ p.visible=RND()>.06?true:false; }); }
   return p;
 }
 function pointLight(x,y,z,color,intensity,dist){
@@ -1377,13 +1392,13 @@ function mazeGen(N){
     const nb=[[x+1,y,'v',x+1,y],[x-1,y,'v',x,y],[x,y+1,'h',x,y+1],[x,y-1,'h',x,y]]
       .filter(a=>{const nx=a[0],ny=a[1];return nx>=0&&ny>=0&&nx<N&&ny<N&&!vis[ny][nx];});
     if(!nb.length){st.pop();continue;}
-    const [nx,ny,t,wi,wj]=nb[(Math.random()*nb.length)|0];
+    const [nx,ny,t,wi,wj]=nb[(RND()*nb.length)|0];
     if(t==='v')vw[wi][y]=false; else hw[x][wj]=false;
     vis[ny][nx]=true; st.push([nx,ny]);
   }
   // ouvrir davantage
-  for(let i=1;i<N;i++)for(let j=0;j<N;j++)if(vw[i][j]&&Math.random()<.3)vw[i][j]=false;
-  for(let i=0;i<N;i++)for(let j=1;j<N;j++)if(hw[i][j]&&Math.random()<.3)hw[i][j]=false;
+  for(let i=1;i<N;i++)for(let j=0;j<N;j++)if(vw[i][j]&&RND()<.3)vw[i][j]=false;
+  for(let i=0;i<N;i++)for(let j=1;j<N;j++)if(hw[i][j]&&RND()<.3)hw[i][j]=false;
   return {vw,hw};
 }
 
@@ -1413,16 +1428,16 @@ function genDungeon(NX,NZ,opts){
     const nb=[[x+1,y,'v',x+1,y],[x-1,y,'v',x,y],[x,y+1,'h',x,y+1],[x,y-1,'h',x,y]]
       .filter(a=>{const nx=a[0],ny=a[1];return nx>=0&&ny>=0&&nx<NX&&ny<NZ&&!vis[ny][nx];});
     if(!nb.length){st.pop();continue;}
-    const [nx,ny,t,wi,wj]=nb[(Math.random()*nb.length)|0];
+    const [nx,ny,t,wi,wj]=nb[(RND()*nb.length)|0];
     if(t==='v')vw[wi][y]=false; else hw[x][wj]=false;
     let e=elev[y][x];
-    if(maxElev>0&&Math.random()<elevChance) e=clamp(e+(Math.random()<.5?1:-1),0,maxElev);
+    if(maxElev>0&&RND()<elevChance) e=clamp(e+(RND()<.5?1:-1),0,maxElev);
     elev[ny][nx]=e;
     vis[ny][nx]=true; order.push([nx,ny]); st.push([nx,ny]);
   }
   // boucles supplémentaires : ne retirent que des murs déjà définis, ne cassent jamais la connexité de l'arbre couvrant
-  for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++)if(vw[i][j]&&Math.random()<extraOpen)vw[i][j]=false;
-  for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++)if(hw[i][j]&&Math.random()<extraOpen)hw[i][j]=false;
+  for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++)if(vw[i][j]&&RND()<extraOpen)vw[i][j]=false;
+  for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++)if(hw[i][j]&&RND()<extraOpen)hw[i][j]=false;
   return {vw,hw,elev,order,NX,NZ};
 }
 function addWeirdChair(x,y,z,mode,ceilY){
@@ -1510,7 +1525,7 @@ function buildDungeon(grid,cfg){
   // l'impression d'un point de validation absent ou inaccessible.
   for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++) if(skipFloor(i,j)) occupied.add(i+','+j);
   const invertedSet=new Set();
-  if(weird>0) order.forEach(([i,j])=>{ if((i||j)&&Math.random()<weird*.3) invertedSet.add(i+','+j); });
+  if(weird>0) order.forEach(([i,j])=>{ if((i||j)&&RND()<weird*.3) invertedSet.add(i+','+j); });
   for(let i=0;i<NX;i++)for(let j=0;j<NZ;j++){
     const fy=fAt(i,j), hy=hFn(i,j), inv=invertedSet.has(i+','+j);
     // skipFloor : laisse la cellule creuse (ex: bassin d'eau construit séparément en-dessous) —
@@ -1531,19 +1546,19 @@ function buildDungeon(grid,cfg){
     box(C+.32,top-bot,.32,matWall,ox+i*C+C/2,bot+(top-bot)/2,oz+j*C,{cast:true});
   }
   if(cfg.pillarChance) for(let i=1;i<NX;i++)for(let j=1;j<NZ;j++)
-    if(!skipFloor(i,j)&&Math.random()<cfg.pillarChance) box(.5,hFn(i,j),.5,matWall,ox+i*C,fAt(i,j)+hFn(i,j)/2,oz+j*C,{cast:true});
+    if(!skipFloor(i,j)&&RND()<cfg.pillarChance) box(.5,hFn(i,j),.5,matWall,ox+i*C,fAt(i,j)+hFn(i,j)/2,oz+j*C,{cast:true});
   if(cfg.lightChance) order.forEach(([i,j])=>{
-    if(Math.random()<cfg.lightChance) lightPanel(ox+i*C+C/2,fAt(i,j)+hFn(i,j)-.06,oz+j*C+C/2,C*.5,C*.5,Math.random()<.12);
+    if(RND()<cfg.lightChance) lightPanel(ox+i*C+C/2,fAt(i,j)+hFn(i,j)-.06,oz+j*C+C/2,C*.5,C*.5,RND()<.12);
   });
   if(weird>0) order.forEach(([i,j])=>{
-    if((i||j)&&Math.random()<weird*.1){
-      addWeirdChair(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,Math.random()<.5?'ceiling':'sunk',fAt(i,j)+hFn(i,j));
+    if((i||j)&&RND()<weird*.1){
+      addWeirdChair(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,RND()<.5?'ceiling':'sunk',fAt(i,j)+hFn(i,j));
       occupied.add(i+','+j);
     }
   });
   if(cfg.clutterChance) order.forEach(([i,j])=>{
-    if(!skipFloor(i,j)&&Math.random()<cfg.clutterChance){
-      const kind=CLUTTER_KINDS[(Math.random()*CLUTTER_KINDS.length)|0];
+    if(!skipFloor(i,j)&&RND()<cfg.clutterChance){
+      const kind=CLUTTER_KINDS[(RND()*CLUTTER_KINDS.length)|0];
       addClutterProp(ox+i*C+C/2,fAt(i,j),oz+j*C+C/2,fAt(i,j)+hFn(i,j),kind);
       occupied.add(i+','+j);
     }
@@ -1556,7 +1571,7 @@ function buildDungeon(grid,cfg){
     randomCells:(n,minDistFromEntry)=>{
       let pool=order.filter(([i,j])=>(!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry)&&!occupied.has(i+','+j));
       if(pool.length<n) pool=order.filter(([i,j])=>!minDistFromEntry||Math.hypot(i,j)>minDistFromEntry); // repli si trop peu de cellules libres restantes
-      pool.sort(()=>Math.random()-.5);
+      pool.sort(()=>RND()-.5);
       const picked=pool.slice(0,n);
       picked.forEach(([i,j])=>occupied.add(i+','+j));
       return picked;
@@ -1619,19 +1634,19 @@ function buildPool(){
   scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.11));
   const NX=16,NZ=12,C=7,H=5.4,H2=9.2,ox=-NX*C/2,oz=-NZ*C/2;
   // bande à plafond haut (atrium) — position aléatoire à chaque génération
-  const atriumI0=3+((Math.random()*(NX-8))|0), atriumW=3+((Math.random()*3)|0);
+  const atriumI0=3+((RND()*(NX-8))|0), atriumW=3+((RND()*3)|0);
   const hAt=(i)=>(i>=atriumI0&&i<atriumI0+atriumW)?H2:H;
   // plusieurs bassins (2 à 3), chacun un rectangle de cellules contigu, creusé en piscine
   // enterrée sous le niveau du sol (calculés AVANT la génération du sol pour que ces cellules
   // soient laissées creuses — sans ça le carrelage plat masquait entièrement la piscine et on
   // tombait dedans sans la voir). Placement avec tirages successifs pour éviter que deux bassins
   // ne se chevauchent ou se touchent directement.
-  const poolCount=2+((Math.random()*2)|0);
+  const poolCount=2+((RND()*2)|0);
   const pools=[];
   for(let n=0;n<poolCount;n++){
     for(let attempt=0;attempt<40;attempt++){
-      const fw=3+((Math.random()*3)|0), fd=2+((Math.random()*3)|0);
-      const fx0=2+((Math.random()*(NX-4-fw))|0), fz0=1+((Math.random()*(NZ-2-fd))|0);
+      const fw=3+((RND()*3)|0), fd=2+((RND()*3)|0);
+      const fx0=2+((RND()*(NX-4-fw))|0), fz0=1+((RND()*(NZ-2-fd))|0);
       const overlaps=pools.some(p=>fx0<p.fx0+p.fw+1&&fx0+fw+1>p.fx0&&fz0<p.fz0+p.fd+1&&fz0+fd+1>p.fz0);
       if(!overlaps){ pools.push({fx0,fz0,fw,fd}); break; }
     }
@@ -1731,7 +1746,7 @@ function buildPool(){
   setupRandomMission('pool',spots);
   ambience({noise:.012,noiseF:600});
   // gouttes d'eau
-  updaters.push(dt=>{ if(Math.random()<dt*.5) blip(rand(1400,2400),.25,.05); });
+  updaters.push(dt=>{ if(RND()<dt*.5) blip(rand(1400,2400),.25,.05); });
 }
 
 /* ========== LEVEL 6 — LIGHTS OUT ========== */
@@ -1787,7 +1802,7 @@ function buildLights(){
     levelGroup.add(g);
     colliders.push({minx:x-1.4,maxx:x+1.4,minz:z-.6,maxz:z+.6,top:2.2,bot:0});
   };
-  dungeon.randomCells(8,3).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,Math.random()<.5?0:Math.PI/2); });
+  dungeon.randomCells(8,3).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,RND()<.5?0:Math.PI/2); });
   // mur de briques ponctuel (décor)
   const bc=dungeon.randomCells(1,3)[0];
   if(bc){ const p=dungeon.worldOf(...bc); box(6,H,.4,MAT.brick,p.x,H/2,p.z-2); }
@@ -1801,7 +1816,7 @@ function buildLights(){
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('lights',spots);
   ambience({hum:52,humVol:.014,humType:'sine',noise:.003,noiseF:120});
-  updaters.push(dt=>{ if(Math.random()<dt*.06){thunk(.12);} });
+  updaters.push(dt=>{ if(RND()<dt*.06){thunk(.12);} });
 }
 /* ---------------- entités hostiles génériques ---------------- */
 const HOSTILE_CFG={
@@ -1826,7 +1841,7 @@ function drawEntityFace(type,c,w,h,opaque){
       c.save();c.translate(x,y);c.rotate(a+Math.PI/2);c.fillRect(-w*.012,0,w*.024,h*.06);c.restore();}
     c.strokeStyle='rgba(200,20,20,.55)';c.lineWidth=2;
     for(let i=0;i<5;i++){const x=w*.4+i*w*.05;c.beginPath();c.moveTo(x,h*.58);
-      c.lineTo(x,h*.58+18+Math.random()*22);c.stroke();}
+      c.lineTo(x,h*.58+18+RND()*22);c.stroke();}
   } else if(type==='mimic'){
     c.fillStyle='rgba(150,150,140,.5)'; c.beginPath(); c.ellipse(w/2,h/2,w*.34,h*.4,0,0,Math.PI*2); c.fill();
     glow(w*.36,h*.36,w*.1,'rgba(255,255,255,.95)'); glow(w*.64,h*.36,w*.1,'rgba(255,255,255,.95)');
@@ -1834,8 +1849,8 @@ function drawEntityFace(type,c,w,h,opaque){
     for(let i=0;i<7;i++) c.lineTo(w/2+(i%2?1:-1)*w*.055,h*.44+i*h*.07);
     c.stroke();
   } else if(type==='static'){
-    for(let i=0;i<1100;i++){c.fillStyle=`rgba(${Math.random()<.5?'150,255,170':'255,255,255'},${Math.random()*.85})`;
-      c.fillRect(Math.random()*w,Math.random()*h,2,2);}
+    for(let i=0;i<1100;i++){c.fillStyle=`rgba(${RND()<.5?'150,255,170':'255,255,255'},${RND()*.85})`;
+      c.fillRect(RND()*w,RND()*h,2,2);}
     c.fillStyle='#000'; c.fillRect(w*.28,h*.28,w*.16,h*.18); c.fillRect(w*.56,h*.28,w*.16,h*.18);
   } else if(type==='faceless'){
     c.fillStyle='#e8c9a0'; c.beginPath(); c.ellipse(w/2,h/2,w*.3,h*.38,0,0,Math.PI*2); c.fill();
@@ -1892,7 +1907,7 @@ function spawnHostile(type,zones){
   let state='idle', cd=rand(2,5), expose=0;
   updaters.push(dt=>{
     if(state==='idle'){ cd-=dt;
-      if(cd<=0){ const z=zones[(Math.random()*zones.length)|0];
+      if(cd<=0){ const z=zones[(RND()*zones.length)|0];
         sp.position.set(z.x+rand(-2,2),1.6,z.z+rand(-2,2));
         if(sp.position.distanceTo(player.pos)>cfg.hunt-1){ sp.visible=true; state='hunt';
           blip(rand(55,90),.8,.14,'sawtooth');
@@ -1931,7 +1946,7 @@ function spawnLostExplorer(zones){
   pack.position.set(0,1,-.22);
   g.add(body); g.add(head); g.add(pack); levelGroup.add(g); g.visible=false;
   let placed=false, cd=rand(6,14);
-  const place=()=>{ const z=zones[(Math.random()*zones.length)|0];
+  const place=()=>{ const z=zones[(RND()*zones.length)|0];
     g.position.set(z.x+rand(-3,3),0,z.z+rand(-3,3)); g.visible=true; placed=true; };
   updaters.push(dt=>{
     if(!placed){ cd-=dt; if(cd<=0)place(); return; }
@@ -1952,7 +1967,7 @@ function spawnWatcher(zones){
   const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,opacity:0}));
   sp.scale.set(1.5,1.9,1); levelGroup.add(sp);
   let placed=false, cd=rand(4,9), dissolving=false;
-  const place=()=>{ const z=zones[(Math.random()*zones.length)|0];
+  const place=()=>{ const z=zones[(RND()*zones.length)|0];
     sp.position.set(z.x+rand(-2,2),1.55,z.z+rand(-2,2));
     sp.material.opacity=0; placed=true; dissolving=false; };
   updaters.push(dt=>{
@@ -1987,9 +2002,9 @@ function buildElec(){
     const p=dungeon.worldOf(i,j);
     box(3.4,2.4,2,MAT.metal,p.x,1.2,p.z,{cast:true});
     const led=new THREE.Mesh(new THREE.PlaneGeometry(.12,.12),
-      new THREE.MeshBasicMaterial({color:Math.random()<.5?0xff3030:0x30ff50}));
+      new THREE.MeshBasicMaterial({color:RND()<.5?0xff3030:0x30ff50}));
     led.position.set(p.x+rand(-1,1),1.7,p.z+1.02); levelGroup.add(led);
-    updaters.push(dt=>{if(Math.random()<dt*2)led.visible=!led.visible;});
+    updaters.push(dt=>{if(RND()<dt*2)led.visible=!led.visible;});
   });
   // transformateurs cylindriques
   dungeon.randomCells(4,4).forEach(([i,j])=>{
@@ -2001,7 +2016,7 @@ function buildElec(){
   // câbles au plafond
   for(let i=0;i<10;i++){
     const c=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,rand(6,14),6),MAT.black);
-    c.rotation.z=Math.PI/2; c.position.set(rand(ox+4,ox+NX*C-4),H-.3-Math.random()*.5,rand(oz+4,oz+NZ*C-4));
+    c.rotation.z=Math.PI/2; c.position.set(rand(ox+4,ox+NX*C-4),H-.3-RND()*.5,rand(oz+4,oz+NZ*C-4));
     levelGroup.add(c);
   }
   // lumières rouges de secours
@@ -2042,10 +2057,10 @@ function buildMall(){
   levelGrid=grid; levelDungeon=dungeon;
   // devantures de boutiques
   dungeon.randomCells(14,2).forEach(([i,j])=>{
-    const p=dungeon.worldOf(i,j), side=Math.random()<.5?-1:1;
+    const p=dungeon.worldOf(i,j), side=RND()<.5?-1:1;
     box(.15,2.6,3.6,MAT.metal,p.x+side*(C/2-.4),1.3,p.z,{cast:true});
     const signT=tex(256,96,(c,w,h)=>{c.fillStyle='#1a1a1a';c.fillRect(0,0,w,h);
-      c.fillStyle=['#e35b8a','#5bb0e3','#e3c15b','#7fdc9e'][(Math.random()*4)|0];
+      c.fillStyle=['#e35b8a','#5bb0e3','#e3c15b','#7fdc9e'][(RND()*4)|0];
       c.font='bold 30px Courier New';c.textAlign='center';c.fillText('BOUTIQUE',w/2,55);});
     const sign=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1),new THREE.MeshBasicMaterial({map:signT}));
     sign.position.set(p.x+side*(C/2-.42),2.9,p.z); sign.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(sign);
@@ -2105,10 +2120,10 @@ function buildHotel(){
   levelGrid=grid; levelDungeon=dungeon;
   // portes numérotées (accent + points de mission), dispersées le long des couloirs
   const doors=dungeon.randomCells(10,3).map(([i,j])=>{
-    const p=dungeon.worldOf(i,j), side=Math.random()<.5?-1:1;
+    const p=dungeon.worldOf(i,j), side=RND()<.5?-1:1;
     box(.9,2.1,.12,MAT.wood,p.x+side*(C/2-.06),1.05,p.z,{col:false,cast:true});
     const numT=tex(64,64,(c,w,h)=>{c.fillStyle='#d4b46a';c.font='24px Courier New';c.textAlign='center';
-      c.fillText(((Math.random()*90)|10)+'',w/2,38);});
+      c.fillText(((RND()*90)|10)+'',w/2,38);});
     const num=new THREE.Mesh(new THREE.PlaneGeometry(.3,.3),new THREE.MeshBasicMaterial({map:numT}));
     num.position.set(p.x+side*(C/2-.13),1.6,p.z); num.rotation.y=side>0?-Math.PI/2:Math.PI/2; levelGroup.add(num);
     return V3(p.x+side*(C/2-.5),1,p.z);
@@ -2122,7 +2137,7 @@ function buildHotel(){
   elevatorProp(ox+C/2,oz+C/2-1.4,0);
   setupRandomMission('hotel',spots);
   ambience({hum:70,humVol:.018,humType:'sine',noise:.006,noiseF:300});
-  updaters.push(dt=>{ if(Math.random()<dt*.04) blip(rand(300,500),.4,.08); }); // tic-tac lointain
+  updaters.push(dt=>{ if(RND()<dt*.04) blip(rand(300,500),.4,.08); }); // tic-tac lointain
 }
 
 /* ========== LEVEL 71 — FORGOTTEN METRO ========== */
@@ -2130,7 +2145,7 @@ function buildMetro(){
   scene.fog=new THREE.FogExp2(0x0a0c0e,.038);
   renderer.setClearColor(0x0a0c0e);
   scene.add(new THREE.AmbientLight(0x3a4048,.24));
-  const H=4.8,L=54+((Math.random()*30)|0),platW=7,trackW=4,gap=4,Wt=platW*2+trackW;
+  const H=4.8,L=54+((RND()*30)|0),platW=7,trackW=4,gap=4,Wt=platW*2+trackW;
   box(platW,.2,L,MAT.metro,-platW/2-trackW/2,-.1,0,{col:false});
   box(platW,.2,L,MAT.metro,platW/2+trackW/2,-.1,0,{col:false});
   box(trackW,.05,L,MAT.black,0,-.14,0,{col:false});
@@ -2149,16 +2164,16 @@ function buildMetro(){
     win.position.set(trackW/2-.21,1.5,z); win.rotation.y=Math.PI/2; levelGroup.add(win);
   }
   for(let z=-L/2+3;z<L/2-3;z+=6){
-    lightPanel(-platW/2-trackW/2,H-.06,z,2,1,Math.random()<.15);
-    lightPanel(platW/2+trackW/2,H-.06,z,2,1,Math.random()<.15);
-    if(Math.random()<.5) box(.4,1.1,.4,MAT.metro,-platW-trackW/2+.6,.55,z,{cast:true}); // bancs
-    if(Math.random()<.14){ const kind=CLUTTER_KINDS[(Math.random()*CLUTTER_KINDS.length)|0];
+    lightPanel(-platW/2-trackW/2,H-.06,z,2,1,RND()<.15);
+    lightPanel(platW/2+trackW/2,H-.06,z,2,1,RND()<.15);
+    if(RND()<.5) box(.4,1.1,.4,MAT.metro,-platW-trackW/2+.6,.55,z,{cast:true}); // bancs
+    if(RND()<.14){ const kind=CLUTTER_KINDS[(RND()*CLUTTER_KINDS.length)|0];
       addClutterProp(rand(-platW-trackW/2+1,platW+trackW/2-1),0,z,H,kind); }
   }
   pointLight(0,H-1,0,0xbcd4ff,.35,26);
   // panneaux publicitaires lumineux (référence photo tunnel piéton)
   const adT=tex(200,300,(c,w,h)=>{
-    c.fillStyle=['#c9302c','#2c6fc9','#c9a02c','#3aa15a'][(Math.random()*4)|0];
+    c.fillStyle=['#c9302c','#2c6fc9','#c9a02c','#3aa15a'][(RND()*4)|0];
     c.fillRect(0,0,w,h);
     c.fillStyle='rgba(255,255,255,.85)';
     for(let i=0;i<5;i++)c.fillRect(14,20+i*46,w-28,26);
@@ -2195,7 +2210,7 @@ function buildMetro(){
   elevatorProp(-platW-trackW/2+1,-L/2+2,0);
   setupRandomMission('metro',spots);
   ambience({hum:44,humVol:.02,humType:'sawtooth',noise:.01,noiseF:180});
-  updaters.push(dt=>{ if(Math.random()<dt*.03) blip(rand(60,120),1.2,.2,'sawtooth'); }); // grondement lointain de rame
+  updaters.push(dt=>{ if(RND()<dt*.03) blip(rand(60,120),1.2,.2,'sawtooth'); }); // grondement lointain de rame
 }
 
 /* ========== LEVEL 8 — CRIMSON OFFICES ========== */
@@ -2269,7 +2284,7 @@ function buildFrozen(){
   spawnHostile('faceless',dungeon.randomCells(3,4).map(([i,j])=>dungeon.worldOf(i,j)));
   spawnHostile('stalker',dungeon.randomCells(4,3).map(([i,j])=>dungeon.worldOf(i,j)));
   // souffle de vent / craquements
-  updaters.push(dt=>{ if(Math.random()<dt*.15) blip(rand(2000,3200),.15,.04); });
+  updaters.push(dt=>{ if(RND()<dt*.15) blip(rand(2000,3200),.15,.04); });
   player.pos.set(ox+C/2,1.65,oz+C/2+1.2); player.yaw=0;
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('frozen',spots);
@@ -2306,7 +2321,7 @@ function buildLibrary(){
     levelGroup.add(g);
     colliders.push({minx:x-1.6,maxx:x+1.6,minz:z-.6,maxz:z+.6,top:3.1,bot:0});
   };
-  dungeon.randomCells(16,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,Math.random()<.5?0:Math.PI/2); });
+  dungeon.randomCells(16,2).forEach(([i,j])=>{ const p=dungeon.worldOf(i,j); shelf(p.x,p.z,RND()<.5?0:Math.PI/2); });
   pointLight(ox+C/2,H-1,oz+C/2,0xd8b878,.5,20);
   const spots=dungeon.randomCells(3,5).map(([i,j])=>{ const p=dungeon.worldOf(i,j); return V3(p.x,1,p.z); });
   spots.forEach((p,i)=>{
@@ -2323,7 +2338,7 @@ function buildLibrary(){
   elevatorProp(ox+C/2,oz+C/2-2.4,0);
   setupRandomMission('library',spots);
   ambience({hum:38,humVol:.012,humType:'sine',noise:.008,noiseF:500});
-  updaters.push(dt=>{ if(Math.random()<dt*.08) blip(rand(150,260),.3,.08); }); // pages qui tournent
+  updaters.push(dt=>{ if(RND()<dt*.08) blip(rand(150,260),.3,.08); }); // pages qui tournent
 }
 
 /* ========== LEVEL 100 — THE OBSERVATORY ========== */
@@ -2332,23 +2347,23 @@ function buildObservatory(){
   renderer.setClearColor(0x05060c);
   scene.add(new THREE.AmbientLight(0x4a5a88,1.2));
   scene.add(new THREE.HemisphereLight(0xcfe0ff,0x2a3050,.7));
-  const R=16+((Math.random()*10)|0),H=9,seg=28;
+  const R=16+((RND()*10)|0),H=9,seg=28;
   const floorGeo=new THREE.CylinderGeometry(R,R,.2,seg);
   const floor=new THREE.Mesh(floorGeo,MAT.obs); floor.position.y=-.1; levelGroup.add(floor);
   colliders.push({minx:-R,maxx:R,minz:-R,maxz:R,top:0,bot:-1}); // approx (les murs courbes gèrent le reste)
   const starTex=tex(1024,512,(c,w,h)=>{c.fillStyle='#04060f';c.fillRect(0,0,w,h);
-    for(let i=0;i<400;i++){c.fillStyle=`rgba(255,255,255,${Math.random()*.9})`;
-      c.fillRect(Math.random()*w,Math.random()*h,Math.random()<.1?2:1,Math.random()<.1?2:1);}});
+    for(let i=0;i<400;i++){c.fillStyle=`rgba(255,255,255,${RND()*.9})`;
+      c.fillRect(RND()*w,RND()*h,RND()<.1?2:1,RND()<.1?2:1);}});
   const dome=new THREE.Mesh(new THREE.SphereGeometry(R,seg,16,0,Math.PI*2,0,Math.PI/2),
     new THREE.MeshBasicMaterial({map:starTex,side:THREE.BackSide}));
   dome.position.y=0; levelGroup.add(dome);
   for(let i=0;i<seg;i+=2){
-    if(Math.random()<.8){ const a=(i/seg)*Math.PI*2;
+    if(RND()<.8){ const a=(i/seg)*Math.PI*2;
       box(.5,H,.5,MAT.obs,Math.cos(a)*(R-.6),H/2,Math.sin(a)*(R-.6),{cast:true}); }
   }
   for(let k=0;k<8;k++){
     const a=rand(0,Math.PI*2), r=rand(2,R-3);
-    addClutterProp(Math.cos(a)*r,0,Math.sin(a)*r,H,Math.random()<.5?'floorStain':'box');
+    addClutterProp(Math.cos(a)*r,0,Math.sin(a)*r,H,RND()<.5?'floorStain':'box');
   }
   // télescope central
   const tele=new THREE.Mesh(new THREE.CylinderGeometry(.35,.5,3,10),MAT.metal);
@@ -2412,7 +2427,7 @@ function buildExit(){
   updaters.push(dt=>{
     if(player.pos.z<-L+4){ triggerEnding(); }
     // chuchotements
-    if(Math.random()<dt*.12) blip(rand(180,340),.4,.02,'sine');
+    if(RND()<dt*.12) blip(rand(180,340),.4,.02,'sine');
   });
   player.pos.set(0,1.65,2.6); player.yaw=Math.PI;
   setupMission('exit');
@@ -2436,7 +2451,7 @@ const CATS=[
   {id:'extraction',     obj:'Extraire des échantillons biologiques',    verb:'Extraire l\'échantillon', done:'Échantillon extrait'},
 ];
 function setupRandomMission(id,spots,names){
-  const cat=CATS[(Math.random()*CATS.length)|0];
+  const cat=CATS[(RND()*CATS.length)|0];
   mission={level:id,progress:0,total:spots.length,obj:cat.obj,complete:false,cat:cat.id};
   spots.forEach((p,i)=>{
     const label=names&&names[i]?names[i]:null;
@@ -2614,7 +2629,7 @@ function vhsTick(dt){
     blip(rand(90,180),.2,.05,'square');
     setTimeout(()=>{ el.classList.remove('tracking');
       if(vhsPass){ vhsPass.uniforms.glitch.value=.35; vhsPass.uniforms.aberration.value=.0028; }
-    },140+Math.random()*180);
+    },140+RND()*180);
     vhsGlitchCd=rand(4,9);
   }
   const t=vhsElapsed|0, hh=(t/3600|0), mm=(t/60%60|0), ss=(t%60|0);
@@ -2861,8 +2876,8 @@ function triggerEnding(){
     catch(e){ ctx.fillStyle='#d9d2ba'; ctx.fillRect(0,0,pc.width,pc.height); }
     // assombrir + grain
     ctx.fillStyle='rgba(30,24,10,.35)'; ctx.fillRect(0,0,pc.width,pc.height);
-    for(let i=0;i<4000;i++){ctx.fillStyle=`rgba(255,255,255,${Math.random()*.08})`;
-      ctx.fillRect(Math.random()*pc.width,Math.random()*pc.height,1,1);}
+    for(let i=0;i<4000;i++){ctx.fillStyle=`rgba(255,255,255,${RND()*.08})`;
+      ctx.fillRect(RND()*pc.width,RND()*pc.height,1,1);}
     // la silhouette, derrière
     ctx.fillStyle='rgba(8,8,10,.92)';
     const sx=pc.width*.62,sy=pc.height*.5;
@@ -2951,15 +2966,15 @@ const MP=(()=>{
 
   const esc=s=>(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function uuid4(){ return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
-    const r=Math.random()*16|0,v=c==='x'?r:(r&0x3|0x8); return v.toString(16); }); }
+    const r=RND()*16|0,v=c==='x'?r:(r&0x3|0x8); return v.toString(16); }); }
   function genRoomCode(){
-    let s=''; for(let i=0;i<5;i++) s+=CODE_ALPHABET[(Math.random()*CODE_ALPHABET.length)|0];
+    let s=''; for(let i=0;i<5;i++) s+=CODE_ALPHABET[(RND()*CODE_ALPHABET.length)|0];
     return s;
   }
 
   function loadPseudo(){
     pseudo=localStorage.getItem('meg-pseudo');
-    if(!pseudo){ pseudo='Agent-'+Math.floor(1000+Math.random()*9000); localStorage.setItem('meg-pseudo',pseudo); }
+    if(!pseudo){ pseudo='Agent-'+Math.floor(1000+RND()*9000); localStorage.setItem('meg-pseudo',pseudo); }
     return pseudo;
   }
   function savePseudo(p){
@@ -3091,7 +3106,7 @@ const MP=(()=>{
         line('   → dans Supabase : SQL Editor > exécutez tout le contenu de supabase-schema.sql.');
         return;
       }
-      const testId=uuid4(), testCode='ZTEST'+((Math.random()*9999)|0);
+      const testId=uuid4(), testCode='ZTEST'+((RND()*9999)|0);
       try{
         const {error}=await sb.from('mp_rooms').insert(
           {id:testId,code:testCode,leader_id:uid,leader_pseudo:'diag',level_id:'lobby',status:'ended'});
@@ -3196,7 +3211,10 @@ const MP=(()=>{
   }
   async function startGame(){
     if(!room||room.leader_id!==uid)return;
-    await sb.from('mp_rooms').update({status:'starting'}).eq('id',room.id);
+    // graine partagée tirée par le chef : tous les coéquipiers généreront le même niveau
+    // (voir seedRng/RND — sans ça, chaque client tirait son propre labyrinthe au hasard)
+    const seed=Math.floor(Math.random()*2147483647)+1;
+    await sb.from('mp_rooms').update({status:'starting',seed}).eq('id',room.id);
   }
   function beginLoadingSequence(){
     $('mpLoading').classList.add('on');
@@ -3210,10 +3228,16 @@ const MP=(()=>{
   async function launchIntoLevel(levelId){
     if(!renderer){ auInit(); await load(); init(); }
     if(!IS_TOUCH) $('game').requestPointerLock&&$('game').requestPointerLock();
-    loadLevel(levelId); // buildXxx() appelle déjà setupRandomMission avec le vrai nombre de points —
+    // graine partagée par le chef d'équipe (voir startGame) : tant qu'elle est active, tous les
+    // tirages aléatoires de la génération de niveau (murs, bassins, décor, spawns...) passent par
+    // la même séquence déterministe sur chaque client, donc tout le monde obtient le même niveau.
+    // Désactivée juste après pour que le reste du jeu (sons, scintillements...) reste imprévisible.
+    if(room&&room.seed){ seedRng(room.seed); _seedActive=true; }
+    try{ loadLevel(levelId); } // buildXxx() appelle déjà setupRandomMission avec le vrai nombre de points —
     // un second appel à setupMission() ici écraserait cette mission par une version utilisant le
     // total statique de LEVELS[id], qui ne correspond pas forcément aux points réellement générés
     // et pouvait rendre la mission impossible à terminer (progress ne pouvait jamais atteindre total).
+    finally{ _seedActive=false; }
     updateHUD();
     ingameChatOn=false;
     $('mpIngameChat').classList.remove('on');
@@ -3274,13 +3298,33 @@ const MP=(()=>{
   }
   function buildPeerAvatar(name){
     const g=new THREE.Group();
-    const body=new THREE.Mesh(new THREE.CylinderGeometry(.28,.34,1.3,10),
-      new THREE.MeshStandardMaterial({color:0x8a6a2a,emissive:0x3a2a0a,emissiveIntensity:.4,roughness:.7}));
-    body.position.y=.65; g.add(body);
-    const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),
-      new THREE.MeshStandardMaterial({color:0xd8c39a,roughness:.8}));
-    head.position.y=1.42; g.add(head);
-    const label=makeNameSprite(name); label.position.y=1.85; g.add(label);
+    // couleur de veste dérivée du pseudo (déterministe) : chaque coéquipier a sa propre teinte,
+    // plus facile à distinguer qu'une silhouette unique identique pour tout le monde
+    let hash=0; for(let i=0;i<name.length;i++) hash=(hash*31+name.charCodeAt(i))|0;
+    const hue=((hash%360)+360)%360;
+    const jacket=new THREE.Color().setHSL(hue/360,.5,.38);
+    const legs=new THREE.Mesh(new THREE.CylinderGeometry(.15,.17,.74,8),
+      new THREE.MeshStandardMaterial({color:0x2a2a2e,roughness:.85}));
+    legs.position.y=.4; legs.castShadow=true; g.add(legs);
+    const torso=new THREE.Mesh(new THREE.CylinderGeometry(.23,.27,.6,10),
+      new THREE.MeshStandardMaterial({color:jacket,roughness:.7}));
+    torso.position.y=1.05; torso.castShadow=true; g.add(torso);
+    const shoulders=new THREE.Mesh(new THREE.CylinderGeometry(.28,.24,.14,10),
+      new THREE.MeshStandardMaterial({color:jacket.clone().multiplyScalar(.8),roughness:.75}));
+    shoulders.position.y=1.4; g.add(shoulders);
+    const head=new THREE.Mesh(new THREE.SphereGeometry(.17,14,12),
+      new THREE.MeshStandardMaterial({color:0xd8c39a,roughness:.7}));
+    head.position.y=1.56; head.castShadow=true; g.add(head);
+    const pack=new THREE.Mesh(new THREE.BoxGeometry(.25,.32,.15),
+      new THREE.MeshStandardMaterial({color:0x33342e,roughness:.85}));
+    pack.position.set(0,1.1,-.21); g.add(pack);
+    // petite lampe frontale (comme celle du joueur), avec un léger halo — ça anime la silhouette
+    // et rend les coéquipiers repérables de loin dans les couloirs sombres
+    const lamp=new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),
+      new THREE.MeshBasicMaterial({color:0xfff2c0}));
+    lamp.position.set(0,1.59,.15); g.add(lamp);
+    const lampGlow=new THREE.PointLight(0xffdca0,.5,3,2); lampGlow.position.copy(lamp.position); g.add(lampGlow);
+    const label=makeNameSprite(name); label.position.y=1.98; g.add(label);
     scene.add(g);
     return {group:g,target:null,targetYaw:0};
   }
@@ -3448,7 +3492,7 @@ function animate(){
   let near=false;
   for(const p of photoTargets){ if(!p.done&&p.pos.distanceTo(player.pos)<13){near=true;break;} }
   $('anom').style.display=near?'block':'none';
-  if(near&&Math.random()<dt*2.2)blip(1900,.03,.03,'square');
+  if(near&&RND()<dt*2.2)blip(1900,.03,.03,'square');
   // détecteur de mouvement (objet acheté au terminal)
   if(S.motionDetector){
     let nearestH=999;
@@ -3457,7 +3501,7 @@ function animate(){
       $('motionDet').textContent='⚠ ENTITÉ DÉTECTÉE — '+Math.round(nearestH)+'m';
       $('motionDet').style.opacity=clamp(1-(nearestH/28),.35,1);
       $('motionDet').classList.add('on');
-      if(Math.random()<dt*(1-nearestH/28)*3) blip(1200,.04,.04,'square');
+      if(RND()<dt*(1-nearestH/28)*3) blip(1200,.04,.04,'square');
     } else $('motionDet').classList.remove('on');
   } else $('motionDet').classList.remove('on');
   // updaters de niveau

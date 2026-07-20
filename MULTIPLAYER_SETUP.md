@@ -14,9 +14,10 @@ reste 100% statique — aucun serveur à héberger de votre côté.
    [`supabase-schema.sql`](./supabase-schema.sql) (tables `mp_rooms` /
    `mp_room_members`, règles de sécurité, activation du Realtime).
    **Si vous aviez déjà exécuté une version précédente de ce script**,
-   ré-exécutez-le quand même : il ajoute la colonne `mp_rooms.code`
-   nécessaire au nouveau système de salon par code, sans toucher aux
-   données existantes (le script est idempotent).
+   ré-exécutez-le quand même : il ajoute les colonnes `mp_rooms.code` et
+   `mp_rooms.seed` (cette dernière permet à toute l'équipe de générer
+   exactement le même niveau — voir plus bas) sans toucher aux données
+   existantes (le script est idempotent).
 4. Dans **Project Settings → API**, copiez :
    - `Project URL`
    - la clé `anon public`
@@ -53,7 +54,10 @@ protège les données (un joueur ne peut modifier que ses propres lignes).
 - Salon (lobby) : pseudo, niveau, statut prêt, places restantes,
   sélection du niveau/mission par le chef vue en temps réel, chat de groupe.
 - **Start Game** (chef d'équipe uniquement) avec animation de chargement,
-  transfert synchronisé de toute l'équipe dans le niveau choisi.
+  transfert synchronisé de toute l'équipe dans le niveau choisi. Le chef
+  tire une graine aléatoire partagée à ce moment-là : tous les coéquipiers
+  génèrent alors exactement le même niveau (mêmes murs, même décor, mêmes
+  zones de monstres) au lieu de labyrinthes différents chacun de leur côté.
 - En jeu : les coéquipiers sont visibles (position synchronisée) et un chat
   textuel reste disponible.
 

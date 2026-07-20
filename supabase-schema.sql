@@ -15,6 +15,7 @@ create extension if not exists "pgcrypto";
 create table if not exists mp_rooms (
   id uuid primary key default gen_random_uuid(),
   code text,
+  seed bigint,
   leader_id uuid not null,
   leader_pseudo text not null,
   level_id text,
@@ -22,8 +23,12 @@ create table if not exists mp_rooms (
   created_at timestamptz not null default now()
 );
 -- Migration : si la table mp_rooms existait déjà (version précédente sans salon
--- par code), ajoute la colonne code manquante — sans effet si elle existe déjà.
+-- par code), ajoute les colonnes manquantes — sans effet si elles existent déjà.
 alter table mp_rooms add column if not exists code text;
+-- seed : graine aléatoire partagée, tirée par le chef d'équipe au lancement, pour que
+-- tous les coéquipiers génèrent EXACTEMENT le même niveau (mêmes murs, même décor) —
+-- avant ça, chaque joueur tirait son propre labyrinthe au hasard de son côté.
+alter table mp_rooms add column if not exists seed bigint;
 create unique index if not exists mp_rooms_code_idx on mp_rooms(code);
 alter table mp_rooms replica identity full;
 alter table mp_rooms enable row level security;
