@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v19</div>
+  <div id="verTag" class="px">v20</div>
 </div>
 
 <div id="mpOnline">
@@ -700,27 +700,28 @@ function buildTextures(){
   // carrelage piscine — réservé aux Poolrooms (Metro et Frozen Corridors ont chacun leur propre
   // texture ci-dessous, pour ne plus partager visuellement le même sol qu'un niveau sans rapport)
   TX.tile=tex(512,512,(c,w,h)=>{
-    c.fillStyle='#e9edee'; c.fillRect(0,0,w,h);
+    c.fillStyle='#f7f9f9'; c.fillRect(0,0,w,h);
     const s=64;
-    // légère variation de blancheur par carreau + un carreau taché de temps en temps
+    // légère variation de blancheur par carreau + un carreau taché de temps en temps (rare, discret)
     for(let x=0;x<w;x+=s)for(let y=0;y<h;y+=s){
-      const t=rand(-6,6);
-      c.fillStyle=`rgba(${233+t|0},${237+t|0},${238+t|0},.6)`;
+      const t=rand(-4,4);
+      c.fillStyle=`rgba(${247+t|0},${249+t|0},${249+t|0},.6)`;
       c.fillRect(x+2,y+2,s-4,s-4);
-      if(RND()<.05){ c.fillStyle=`rgba(150,165,150,${rand(.08,.18)})`; c.fillRect(x+3,y+3,s-6,s-6); }
+      if(RND()<.03){ c.fillStyle=`rgba(180,190,185,${rand(.05,.1)})`; c.fillRect(x+3,y+3,s-6,s-6); }
     }
-    // joint en creux : trait clair puis trait sombre juste à côté (impression de profondeur)
+    // joint clair en creux : trait gris pâle puis trait blanc juste à côté (impression de profondeur
+    // sans assombrir l'ensemble)
     c.lineWidth=4;
     for(let x=0;x<=w;x+=s){
-      c.strokeStyle='#9fa9ad'; c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke();
-      c.strokeStyle='rgba(255,255,255,.5)'; c.beginPath();c.moveTo(x+1.5,0);c.lineTo(x+1.5,h);c.stroke();
+      c.strokeStyle='#c7cfd0'; c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke();
+      c.strokeStyle='rgba(255,255,255,.7)'; c.beginPath();c.moveTo(x+1.5,0);c.lineTo(x+1.5,h);c.stroke();
     }
     for(let y=0;y<=h;y+=s){
-      c.strokeStyle='#9fa9ad'; c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();
-      c.strokeStyle='rgba(255,255,255,.5)'; c.beginPath();c.moveTo(0,y+1.5);c.lineTo(w,y+1.5);c.stroke();
+      c.strokeStyle='#c7cfd0'; c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();
+      c.strokeStyle='rgba(255,255,255,.7)'; c.beginPath();c.moveTo(0,y+1.5);c.lineTo(w,y+1.5);c.stroke();
     }
-    speckle(c,w,h,900,.05);
-    vignette(c,w,h,.1);
+    speckle(c,w,h,900,.04);
+    vignette(c,w,h,.06);
   },6,6);
   // faïence de station de métro — carreaux rectangulaires en quinconce (façon carrelage de tunnel
   // piéton), motif bien distinct du quadrillage carré des Poolrooms
@@ -1643,8 +1644,8 @@ function buildLobby(){
 function buildPool(){
   scene.fog=new THREE.FogExp2(0x2e3638,.045);
   renderer.setClearColor(0x2e3638);
-  scene.add(new THREE.AmbientLight(0xd6e0e2,.13));
-  scene.add(new THREE.HemisphereLight(0xdfe8ea,0x6c7a80,.11));
+  scene.add(new THREE.AmbientLight(0xeef4f5,.32));
+  scene.add(new THREE.HemisphereLight(0xf3f8f9,0x8b9a9e,.26));
   const NX=16,NZ=12,C=7,H=5.4,H2=9.2,ox=-NX*C/2,oz=-NZ*C/2;
   // bande à plafond haut (atrium) — position aléatoire à chaque génération
   const atriumI0=3+((RND()*(NX-8))|0), atriumW=3+((RND()*3)|0);
@@ -1670,7 +1671,7 @@ function buildPool(){
   for(let i=1;i<NX;i++)for(let j=0;j<NZ;j++) if(inFlood(i-1,j)&&inFlood(i,j)) grid.vw[i][j]=false;
   for(let i=0;i<NX;i++)for(let j=1;j<NZ;j++) if(inFlood(i,j-1)&&inFlood(i,j)) grid.hw[i][j]=false;
   const dungeon=buildDungeon(grid,{ox,oz,C,H,hAt:(i,j)=>hAt(i),matWall:MAT.tile,matFloor:MAT.tile,matCeil:MAT.tile,
-    pillarChance:.05,lightChance:.26,weirdChance:.2,skipFloor:inFlood,clutterChance:.1});
+    pillarChance:.05,lightChance:.42,weirdChance:.2,skipFloor:inFlood,clutterChance:.1});
   levelGrid=grid; levelDungeon=dungeon;
   const poolDepth=1.3, waterY=-poolDepth+.45;
   // le sol suit le relief normal partout, sauf dans un bassin où il descend en douceur
