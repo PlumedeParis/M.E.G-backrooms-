@@ -282,7 +282,7 @@
   <button class="btn" id="startBtn">▸ Prendre son service</button>
   <button class="btn" id="mpOnlineBtn" style="margin-top:14px">▸ Online Play</button>
   <p style="margin-top:22px;font-size:9px;opacity:.6">PC : ZQSD/WASD · souris · E interagir · F lampe · C photo · V caméscope · Maj courir · T chat équipe<br>Mobile : joystick + glisser pour regarder</p>
-  <div id="verTag" class="px">v18</div>
+  <div id="verTag" class="px">v19</div>
 </div>
 
 <div id="mpOnline">
@@ -1242,7 +1242,9 @@ function addInteract(pos,label,fn,radius){
   return it;
 }
 function addPhotoTarget(pos,name){
-  photoTargets.push({pos:pos.clone(),name,done:false});
+  const t={pos:pos.clone(),name,done:false};
+  photoTargets.push(t);
+  return t;
 }
 function clearLevel(){
   if(levelGroup){scene.remove(levelGroup);
@@ -2463,11 +2465,15 @@ const CATS=[
 ];
 function setupRandomMission(id,spots,names){
   const cat=CATS[(RND()*CATS.length)|0];
-  mission={level:id,progress:0,total:spots.length,obj:cat.obj,complete:false,cat:cat.id};
+  // spotDone : un état par point de mission (indépendant de l'ordre d'ajout dans interactables/
+  // photoTargets, qui contiennent aussi d'autres éléments comme l'ascenseur) — sert à identifier
+  // et synchroniser chaque point individuellement entre coéquipiers en multijoueur.
+  mission={level:id,progress:0,total:spots.length,obj:cat.obj,complete:false,cat:cat.id,spotDone:spots.map(()=>false)};
   spots.forEach((p,i)=>{
     const label=names&&names[i]?names[i]:null;
     if(cat.id==='documentation'){
-      addPhotoTarget(p,label||'Anomalie détectée');
+      const t=addPhotoTarget(p,label||'Anomalie détectée');
+      t.missionIndex=i;
     } else {
       // hauteur du sol réelle à cet endroit (et non un y fixe) : sur un niveau à relief (ex. Lobby,
       // cellules surélevées), un anneau posé à une hauteur fixe pouvait se retrouver enterré sous le
@@ -2477,14 +2483,33 @@ function setupRandomMission(id,spots,names){
         new THREE.MeshBasicMaterial({color:0xffd24a,transparent:true,opacity:.5,side:THREE.DoubleSide}));
       ring.rotation.x=-Math.PI/2; ring.position.set(p.x,ringY,p.z); levelGroup.add(ring);
       updaters.push(dt=>{ if(ring.visible) ring.material.opacity=.25+Math.sin(clock.elapsedTime*3)*.2; });
-      const it=addInteract(p,cat.verb,()=>{
-        if(!it.enabled)return;
-        it.enabled=false; it.radius=0; ring.visible=false; levelGroup.remove(ring);
-        progress(cat.done+(label?' : '+label:''));
-      },cat.id==='observation'?4.5:2.4);
+      const it=addInteract(p,cat.verb,()=>completeMissionSpot(i),cat.id==='observation'?4.5:2.4);
+      it.missionIndex=i; it.ring=ring; it.doneMsg=cat.done+(label?' : '+label:'');
     }
   });
   updateObjectivesHUD();
+}
+// termine un point de mission précis, identifié par son index dans "spots" — utilisée aussi bien
+// pour l'action locale (clic, photo) que pour appliquer la complétion annoncée par un coéquipier
+// (fromRemote=true), afin que la progression et les marqueurs visuels restent identiques pour
+// toute l'équipe : sans ça, chacun ne voyait avancer que ses propres actions.
+function completeMissionSpot(i,fromRemote){
+  if(!mission||!mission.spotDone||mission.spotDone[i])return;
+  mission.spotDone[i]=true;
+  const it=interactables.find(x=>x.missionIndex===i);
+  if(it){
+    it.enabled=false; it.radius=0;
+    if(it.ring){ it.ring.visible=false; levelGroup.remove(it.ring); }
+    progress(it.doneMsg);
+  } else {
+    const t=photoTargets.find(x=>x.missionIndex===i);
+    if(t){
+      t.done=true;
+      if(!fromRemote) S.credits+=25; // la récompense photo revient à qui a pris le cliché, pas à toute l'équipe
+      progress('Anomalie documentée : '+t.name); updateHUD();
+    }
+  }
+  if(!fromRemote) MP.sendMissionProgress(i);
 }
 function setupMission(id){
   const def=LEVELS[id];
@@ -2613,8 +2638,8 @@ function takePhoto(){
     const to=t.pos.clone().sub(camera.position).normalize();
     if(fwd.dot(to)>.9){hit=t;break;}
   }
-  if(hit){ hit.done=true; S.credits+=25;
-    progress('Anomalie documentée : '+hit.name); updateHUD(); }
+  if(hit&&hit.missionIndex!==undefined) completeMissionSpot(hit.missionIndex);
+  else if(hit){ hit.done=true; S.credits+=25; progress('Anomalie documentée : '+hit.name); updateHUD(); }
   else toast('Rien d\'anormal capturé sur ce cliché');
 }
 
@@ -3184,7 +3209,16 @@ const MP=(()=>{
     roomCh=sb.channel('mp-room-'+roomId,{config:{broadcast:{self:false}}});
     roomCh.on('broadcast',{event:'chat'},({payload})=>addChatLine(payload));
     roomCh.on('broadcast',{event:'pos'},({payload})=>onPeerPos(payload));
+    // un coéquipier vient de terminer un point de mission : on applique la même complétion de
+    // notre côté (marqueur caché, progression incrémentée) pour que la mission reste partagée
+    // au lieu que chacun ne voie avancer que ses propres actions
+    roomCh.on('broadcast',{event:'missionProgress'},({payload})=>{
+      if(typeof completeMissionSpot==='function') completeMissionSpot(payload.index,true);
+    });
     roomCh.subscribe();
+  }
+  function sendMissionProgress(i){
+    if(roomCh) roomCh.send({type:'broadcast',event:'missionProgress',payload:{index:i}});
   }
 
   function renderLobby(){
@@ -3402,7 +3436,7 @@ const MP=(()=>{
     if(IS_TOUCH){ const b=$('btnChat'); if(b)b.addEventListener('touchstart',e=>{e.preventDefault();toggleIngameChat();},{passive:false}); }
   }
 
-  return { init:initClient,wireDom,tick,toggleIngameChat,
+  return { init:initClient,wireDom,tick,toggleIngameChat,sendMissionProgress,
     get chatFocused(){ return chatFocused; },
     get inGame(){ return !!room; } };
 })();
